@@ -1,0 +1,211 @@
+// src/pages/CreateAccount.jsx
+import React, { useState } from "react";
+import logo from "../assets/images/rizchat-logo-navy-green.png";
+import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
+import { useForm } from "react-hook-form";
+import Swal from "sweetalert2";
+import Loader from "../components/Loader";
+import socket from "../socket/socket";
+
+const CreateAccount = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm();
+
+  const submitCall = async (data) => {
+    try {
+      setLoading(true);
+
+      const response = await axios.post(
+        "http://localhost:3000/user/createAccount",
+        data,
+      );
+
+      if (response.status === 201) {
+        Swal.fire({
+          title: "Account Created",
+          text: response.data.message,
+          icon: "success",
+        });
+        socket.connect();
+        localStorage.setItem("token", response.data.token);
+        navigate("/MainChat");
+      }
+    } catch (error) {
+      if (error.response) {
+        Swal.fire({
+          title: "Error",
+          text: error.response.data.message,
+          icon: "warning",
+        });
+      } else {
+        Swal.fire({
+          title: "Server Error",
+          text: "Something went wrong",
+          icon: "error",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <>
+      {loading && <Loader text="Creating your account..." />}
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
+        <div className="backdrop-blur-xl bg-gray-900/70 border border-gray-700 rounded-3xl shadow-2xl p-8 w-full max-w-md mx-4">
+          {/* Logo */}
+          <div className="flex flex-col items-center mb-8">
+            <img
+              src={logo}
+              alt="ChatApp Logo"
+              className="w-50 drop-shadow-lg"
+            />
+            <h1 className="text-3xl font-bold text-green-400 mt-2 tracking-wide">
+              Create Account
+            </h1>
+          </div>
+
+          {/* Form */}
+          <form className="space-y-6" onSubmit={handleSubmit(submitCall)}>
+            {/* Full Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Full Name
+              </label>
+              <div className="flex items-center bg-gray-800 rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-green-400">
+                <i className="fa fa-user text-gray-400 mr-3"></i>
+                <input
+                  type="text"
+                  placeholder="Enter your full name"
+                  className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
+                  {...register("name", {
+                    required: "Name is required",
+                    minLength: {
+                      value: 3,
+                      message: "Name Must me at least 3 characters",
+                    },
+                  })}
+                />
+              </div>
+              {errors.name && (
+                <div className="text-red-800" p-1>
+                  {errors.name.message}
+                </div>
+              )}
+            </div>
+
+            {/* Email */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Email
+              </label>
+              <div className="flex items-center bg-gray-800 rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-green-400">
+                <i className="fa fa-envelope text-gray-400 mr-3"></i>
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
+                  {...register("email", {
+                    required: "Email is required",
+                    pattern: {
+                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                      message: "Invalid email address",
+                    },
+                  })}
+                />
+              </div>
+              {errors.email && (
+                <div className="text-red-800 p-1">{errors.email.message}</div>
+              )}
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Password
+              </label>
+              <div className="flex items-center bg-gray-800 rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-green-400">
+                <i className="fa fa-lock text-gray-400 mr-3"></i>
+                <input
+                  type="password"
+                  placeholder="Enter your password"
+                  className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
+                  {...register("password", {
+                    required: " password is required",
+                    minLength: {
+                      value: 3,
+                      message: "Password Must be 6 digits",
+                    },
+                  })}
+                />
+                <i className="fa fa-eye text-gray-400"></i>
+              </div>
+              {errors.password && (
+                <div className="text-red-800 p-1">
+                  {errors.password.message}
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Phone Number
+              </label>
+              <div className="flex items-center bg-gray-800 rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-green-400">
+                <i className="fa fa-lock text-gray-400 mr-3"></i>
+                <input
+                  type="text"
+                  placeholder="Enter Phone Number"
+                  className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
+                  {...register("phone", {
+                    required: "Phone number is required",
+                    pattern: {
+                      value: /^[0-9]{10}$/,
+                      message: "Must be 10 digits",
+                    },
+                  })}
+                />
+              </div>
+              {errors.phone && (
+                <div className="text-red-800 p-1">{errors.phone.message}</div>
+              )}
+            </div>
+
+            {/* Create Account Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center bg-gradient-to-r from-green-500 to-green-700 hover:from-green-600 hover:to-green-800 text-white font-semibold py-3 rounded-xl shadow-lg transition-transform transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                  Creating Account...
+                </>
+              ) : (
+                "Create Account"
+              )}
+            </button>
+
+            {/* Links */}
+            <div className="flex justify-center text-sm text-gray-400 mt-4">
+              <span>Already have an account?</span>
+              <Link to="/" className="ml-2 hover:text-green-400 transition">
+                Login
+              </Link>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default CreateAccount;

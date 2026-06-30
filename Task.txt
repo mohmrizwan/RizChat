@@ -1,0 +1,24 @@
+25-6-26{
+    Today's Tasks
+1. Room & Chat Creation
+ Implement Create Group functionality.
+ Implement Create Chat functionality.
+ Save group/chat data in MongoDB.
+ Connect creation events using Socket.IO.
+
+2. Separate Chats and Groups
+ Display Chats and Groups in different sections/tabs.
+ Toggle between Chats and Groups in the sidebar.
+  Fetch data separately from the backend.
+
+3. Group Join Code System
+ Generate a unique room code when a group is created.
+ Store the code in the database.
+ Allow users to join a group using the generated code.
+ Validate the code before adding the user to the group.
+
+4. User-Specific Visibility
+ Show only those chats/groups where the logged-in user is a member.
+ Hide groups/chats that the user has not joined.
+ Filter data based on the authenticated user's ID.
+}
