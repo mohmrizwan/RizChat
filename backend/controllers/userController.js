@@ -2,7 +2,7 @@ import express from "express";
 import userModel from "../models/userModel.js";
 import bcrypt from "bcrypt";
 import generateToken from "../utils/generateToken.js";
-
+import { uploadToCloudinary } from "../utils/cloudinary.js";
 
 export const createUser = async (req, res) => {
   try {
@@ -13,9 +13,13 @@ export const createUser = async (req, res) => {
 
     const existingUser = await userModel.findOne({ email });
     const existingPhone = await userModel.findOne({ phone });
+    const existingName = await userModel.findOne({ name });
 
     if (existingUser) {
       return res.status(409).json({ message: "Email Already Taken" });
+    }
+    if (existingName) {
+      return res.status(409).json({ message: "Username Already Taken" });
     }
     if (existingPhone) {
       return res.status(409).json({ message: "Phone Already Taken" });
@@ -90,12 +94,91 @@ export const Logout = async (req, res) => {
 
 export const getAllUsers = async (req, res) => {
   try {
-    const user = await userModel.find().select("name email");
+    const user = await userModel.find().select("name email profilePic");
 
     res.status(200).json(user);
   } catch (error) {
     res.status(500).json({
       message: "Something went wrong",
+    });
+  }
+};
+
+export const updateUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    // ✅ require at least one of: name or file
+    if (!name && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Nothing to update — provide a name or profile picture",
+      });
+    }
+
+    const updateData = {};
+
+    if (name) {
+      updateData.name = name;
+    }
+
+    if (req.file) {
+      const uploadResult = await uploadToCloudinary(req.file.buffer, {
+        folder: "rizchat/profile-pics",
+        resource_type: "image",
+      });
+      updateData.profilePic = uploadResult.secure_url;
+    }
+
+    const updatedUser = await userModel.findByIdAndUpdate(userId, updateData, {
+      new: true,
+    });
+
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+export const getProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await userModel.findById(userId).select("-password");
+console.log(user);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
     });
   }
 };

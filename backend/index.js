@@ -6,9 +6,10 @@ import cors from "cors";
 import authRoutes from "./routes/userRoutes.js";
 import roomRoutes from "./routes/roomRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import privateChat from "./routes/conversationRoutes.js";
+import blockRoutes from "./routes/blockRoutes.js";
 
 const app = express();
-const port = 3000;
 
 // Middleware
 app.use(cookieParser());
@@ -29,5 +30,7 @@ app.use(
 app.use("/user", authRoutes);
 app.use("/room", roomRoutes);
 app.use("/message", messageRoutes);
+app.use("/block", blockRoutes)
+app.use("/privateChat", privateChat);
 
 export default app;

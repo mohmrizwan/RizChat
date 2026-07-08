@@ -6,12 +6,13 @@ import {
   deleteMessage,
 } from "../controllers/messageControllers.js";
 import isLoggedIn from "../middleware/isLoggedIn.js";
+import upload from "../middleware/multer.js";
 
 const router = express.Router();
 
-router.post("/sendMessage", isLoggedIn, sendMessage);
+router.post("/sendMessage", upload.single("media"), isLoggedIn, sendMessage);
 router.get("/getMessages/:roomId", isLoggedIn, getMessages);
 router.put("/seen/:roomId", isLoggedIn, seenMessages);
-router.delete("/deleteMessage/:messageId",isLoggedIn, deleteMessage);
+router.delete("/deleteMessage/:messageId", isLoggedIn, deleteMessage);
 
 export default router;

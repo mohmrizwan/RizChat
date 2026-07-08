@@ -6,7 +6,7 @@ import axios from "axios";
 import { useForm } from "react-hook-form";
 import Swal from "sweetalert2";
 import Loader from "../components/Loader";
-import socket from "../socket/socket";
+import { connectSocket } from "../Socket/socket";
 
 const CreateAccount = () => {
   const navigate = useNavigate();
@@ -21,8 +21,9 @@ const CreateAccount = () => {
     try {
       setLoading(true);
 
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
       const response = await axios.post(
-        "http://localhost:3000/user/createAccount",
+        `${API_URL}/user/createAccount`,
         data,
       );
 
@@ -32,8 +33,8 @@ const CreateAccount = () => {
           text: response.data.message,
           icon: "success",
         });
-        socket.connect();
         localStorage.setItem("token", response.data.token);
+        connectSocket(response.data.token);
         navigate("/MainChat");
       }
     } catch (error) {
@@ -76,19 +77,19 @@ const CreateAccount = () => {
             {/* Full Name */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
-                Full Name
+                Username
               </label>
               <div className="flex items-center bg-gray-800 rounded-xl px-4 py-2 focus-within:ring-2 focus-within:ring-green-400">
                 <i className="fa fa-user text-gray-400 mr-3"></i>
                 <input
                   type="text"
-                  placeholder="Enter your full name"
+                  placeholder="Enter your username"
                   className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
                   {...register("name", {
-                    required: "Name is required",
+                    required: "username is required",
                     minLength: {
                       value: 3,
-                      message: "Name Must me at least 3 characters",
+                      message: "Username Must be at least 3 characters",
                     },
                   })}
                 />

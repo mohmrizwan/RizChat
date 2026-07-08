@@ -13,15 +13,36 @@ const messageSchema = new mongoose.Schema(
       ref: "Room",
       required: true,
     },
-
+    conversation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
+      default: null,
+    },
     text: {
       type: String,
-      required: true,
+      default:"",
       trim: true,
     },
     seen: {
       type: Boolean,
       default: false,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    media: {
+      type: String,
+      default: null,
+    },
+    mediaType: {
+      type: String,
+      default: null,
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
     },
   },
   {

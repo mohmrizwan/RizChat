@@ -26,10 +26,14 @@ const userSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    profilePic: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const userModel = mongoose.model("User", userSchema);

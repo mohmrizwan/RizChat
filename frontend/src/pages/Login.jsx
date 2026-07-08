@@ -5,7 +5,7 @@ import axios from "axios";
 import Swal from "sweetalert2";
 import logo from "../assets/images/rizchat-logo-navy-green.png"; // Update your logo path
 import Loader from "../components/Loader";
-import socket from "../socket/socket";
+import { connectSocket } from "../Socket/socket";
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
@@ -21,8 +21,9 @@ const Login = () => {
     try {
       setLoading(true);
 
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
       const response = await axios.post(
-        "http://localhost:3000/user/login",
+        `${API_URL}/user/login`,
         data,
       );
 
@@ -32,8 +33,8 @@ const Login = () => {
           text: response.data.message,
           icon: "success",
         });
-        socket.connect();
         localStorage.setItem("token", response.data.token);
+        connectSocket(response.data.token);
         navigate("/MainChat");
       }
     } catch (error) {

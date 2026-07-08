@@ -24,10 +24,19 @@ const roomSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    lastMessage: {
+      type: String,
+      default: "",
+    },
+
+    lastMessageAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const roomModel = mongoose.model("Room", roomSchema);

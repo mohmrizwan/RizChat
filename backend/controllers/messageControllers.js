@@ -1,53 +1,76 @@
+import fs from "fs";
+import path from "path";
 import messageModel from "../models/messageModel.js";
 import roomModel from "../models/roomModel.js";
+import { uploadToCloudinary } from "../utils/cloudinary.js";
 
 export const sendMessage = async (req, res) => {
+  console.log("BODY:", req.body);
+  console.log("FILE:", req.file);
   try {
-    const { roomId, text } = req.body;
-    const userId = req.user.id;
+    const senderId = req.user.id;
+    const { roomId, text, replyTo } = req.body;
 
-    const room = await roomModel.findById(roomId);
-
-    if (!room) {
-      return res.status(404).json({
-        message: "Room not found",
-      });
+    if (!roomId || (!text?.trim() && !req.file)) {
+      return res.status(400).json({ message: "Message can't be empty" });
     }
 
-    const isMember = room.members.some(
-      (member) => member.toString() === userId,
-    );
+    let media = null;
+    let mediaType = null;
 
-    if (!isMember) {
-      return res.status(403).json({
-        message: "You are not a member",
+    if (req.file) {
+      const uploadResult = await uploadToCloudinary(req.file.buffer, {
+        folder: "rizchat/chat-media",
+        resource_type: "auto",
       });
+      media = uploadResult.secure_url;
+      mediaType = req.file.mimetype.startsWith("image/")
+        ? "image"
+        : req.file.mimetype.startsWith("video/")
+          ? "video"
+          : "file";
     }
 
-    const message = await messageModel.create({
-      sender: userId,
+    if (replyTo) {
+      const existingReply = await messageModel.findById(replyTo);
+      if (
+        !existingReply ||
+        existingReply.room.toString() !== roomId.toString()
+      ) {
+        return res.status(400).json({ message: "Invalid reply target" });
+      }
+    }
+
+    const newMessage = await messageModel.create({
       room: roomId,
-      text,
+      sender: senderId,
+      text: text?.trim() || "",
+      media,
+      mediaType,
+      replyTo: replyTo || null,
+    });
+    await roomModel.findByIdAndUpdate(roomId, {
+      lastMessage: text,
+      lastMessageAt: new Date(),
     });
 
     const populatedMessage = await messageModel
-      .findById(message._id)
-      .populate("sender", "name");
+      .findById(newMessage._id)
+      .populate("sender", "name")
+      .populate({
+        path: "replyTo",
+        populate: { path: "sender", select: "name" },
+      });
 
     const io = req.app.get("io");
+    io.to(roomId.toString()).emit("receiveMessage", populatedMessage);
 
-    io.to(roomId).emit("receiveMessage", populatedMessage);
-
-    return res.status(201).json(populatedMessage);
+    return res.status(200).json({ message: populatedMessage });
   } catch (error) {
     console.log(error);
-
-    return res.status(500).json({
-      message: "Something went wrong",
-    });
+    return res.status(500).json({ message: "Something went wrong" });
   }
 };
-
 export const getMessages = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -74,6 +97,10 @@ export const getMessages = async (req, res) => {
     const messages = await messageModel
       .find({ room: roomId })
       .populate("sender", "name")
+      .populate({
+        path: "replyTo",
+        populate: { path: "sender", select: "name" },
+      })
       .sort({ createdAt: 1 });
 
     return res.status(200).json(messages);
@@ -104,6 +131,18 @@ export const seenMessages = async (req, res) => {
       },
     );
 
+    const io = req.app.get("io");
+    if (io) {
+      io.to(roomId.toString()).emit("messagesSeen", {
+        roomId,
+        seenBy: userId,
+      });
+      io.emit("messagesSeen", {
+        roomId,
+        seenBy: userId,
+      });
+    }
+
     return res.status(200).json({
       message: "Messages seen",
     });
@@ -118,8 +157,12 @@ export const seenMessages = async (req, res) => {
 
 export const deleteMessage = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.user?._id;
     const { messageId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     const message = await messageModel.findById(messageId);
 
@@ -129,26 +172,48 @@ export const deleteMessage = async (req, res) => {
       });
     }
 
-    if (message.sender.toString() !== userId) {
+    if (message.sender.toString() !== userId.toString()) {
       return res.status(403).json({
         message: "You can only delete your own messages",
       });
     }
 
+    if (message.media && !/^https?:\/\//i.test(message.media)) {
+      const filePath = path.join(process.cwd(), message.media);
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          console.log("Failed to delete media file:", err.message);
+        }
+      });
+    }
+
+    message.isDeleted = true;
+    message.text = "This message was deleted";
+    message.media = null;
+    message.mediaType = null;
+    await message.save();
+
     const io = req.app.get("io");
 
-    io.to(message.room.toString()).emit("messageDeleted", {
-      messageId,
-    });
-
-    await message.deleteOne();
+    if (io && message.room) {
+      io.to(message.room.toString()).emit("messageDeleted", {
+        messageId: message._id,
+      });
+    } else {
+      console.log(
+        "⚠️ Could not emit messageDeleted — io:",
+        !!io,
+        "room:",
+        message.room,
+      );
+    }
 
     return res.status(200).json({
       message: "Message deleted successfully",
+      updatedMessage: message,
     });
   } catch (error) {
     console.log(error);
-
     return res.status(500).json({
       message: "Something went wrong",
     });
