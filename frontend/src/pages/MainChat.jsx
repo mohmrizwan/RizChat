@@ -59,13 +59,11 @@ const MainChat = () => {
   const [showChatInfo, setShowChatInfo] = useState(false);
 
   const memberIds = new Set(selectedRoom?.members.map((m) => m._id));
-  
-const availableUsers = allUsers.filter(
-  (user) =>
-    !selectedRoom?.members?.some(
-      (member) => member._id === user._id
-    )
-);
+
+  const availableUsers = allUsers.filter(
+    (user) =>
+      !selectedRoom?.members?.some((member) => member._id === user._id),
+  );
 
   const otherUsers = allUsers.filter((u) => u._id !== currentUserId);
   const currentUserData = allUsers.find((u) => u._id === currentUserId);
@@ -340,11 +338,12 @@ const availableUsers = allUsers.filter(
     }
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  }, [messages, privateMessage]);
+ useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+  });
+}, [messages, privateMessage]);
 
   const getUsers = async () => {
     try {
@@ -850,11 +849,11 @@ const availableUsers = allUsers.filter(
         });
       }
     } catch (error) {
-      if (response.status === 500) {
+      if (error.response?.status === 500) {
         Swal.fire({
           title: "error!",
           icon: "error",
-          text: response.data.message,
+          text: error.response.data.message,
         });
       }
     }
@@ -1370,15 +1369,18 @@ const availableUsers = allUsers.filter(
   return (
     <>
       {loading && <Loader text="Logout your account..." />}
-      <div className="flex h-screen w-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-black text-gray-200 font-inter">
+      {/* ✅ h-dvh (dynamic viewport height) instead of relying only on h-screen —
+          fixes mobile browsers where 100vh includes space behind the URL bar,
+          which was the main cause of the outer page scrollbar. */}
+      <div className="flex h-screen h-dvh w-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-black text-gray-200 font-inter">
         {/* ===================== Sidebar (rooms list) ===================== */}
         <aside
           className={`
-            w-full sm:w-80 md:w-72 lg:w-80 border-r border-gray-800 flex-col bg-gray-900/80 backdrop-blur-xl shrink-0
+            w-full sm:w-80 md:w-72 lg:w-80 h-full min-h-0 border-r border-gray-800 flex-col bg-gray-900/80 backdrop-blur-xl shrink-0
             ${mobileView === "list" ? "flex" : "hidden"} md:flex
           `}
         >
-          <div className="p-4 sm:p-6 border-b border-gray-800">
+          <div className="p-4 sm:p-6 border-b border-gray-800 shrink-0">
             <div className="flex justify-between">
               <h2 className="text-xl font-bold text-green-400 tracking-wide flex items-center ">
                 RizChat
@@ -1399,7 +1401,7 @@ const availableUsers = allUsers.filter(
             />
           </div>
 
-          <div className="p-4 border-b border-gray-800">
+          <div className="p-4 border-b border-gray-800 shrink-0">
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-400 uppercase">View</div>
               <div className="flex items-center space-x-2">
@@ -1429,7 +1431,11 @@ const availableUsers = allUsers.filter(
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* ✅ min-h-0 forces this flex child to respect the parent's height
+              instead of growing to fit its content — this is what actually
+              routes overflow into this element's own scrollbar instead of
+              bubbling up to the page. */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
             {showChats ? (
               <>
                 <h3 className="text-sm uppercase text-gray-400 mb-2">Chats</h3>
@@ -1560,7 +1566,7 @@ const availableUsers = allUsers.filter(
             )}
           </div>
 
-          <div className="p-4 border-t border-gray-800 space-y-3">
+          <div className="p-4 border-t border-gray-800 space-y-3 shrink-0">
             <button
               onClick={() => setShowCreateRoom(true)}
               className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg shadow-md"
@@ -1594,13 +1600,13 @@ const availableUsers = allUsers.filter(
         {/* ===================== Main chat column ===================== */}
         <main
           className={`
-            flex-1 flex-col relative min-w-0
+            flex-1 flex-col relative min-w-0 min-h-0 overflow-hidden
             ${mobileView === "chat" ? "flex" : "hidden"} md:flex
           `}
         >
           {selectedRoom ? (
             <>
-              <header className="flex items-center justify-between p-3 sm:p-4 lg:p-6 border-b border-gray-800 bg-gray-900/90 backdrop-blur-xl shadow-lg gap-2">
+              <header className="flex items-center justify-between p-3 sm:p-4 lg:p-6 border-b border-gray-800 bg-gray-900/90 backdrop-blur-xl shadow-lg gap-2 shrink-0">
                 <div className="flex items-center space-x-2 sm:space-x-3 lg:space-x-4 min-w-0">
                   <button
                     onClick={handleBackToList}
@@ -1678,7 +1684,10 @@ const availableUsers = allUsers.filter(
                 </div>
               </header>
 
-              <section className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
+              {/* ✅ min-h-0 added — this is the scrollable message list; without
+                  min-h-0 it would grow past its flex parent and cause the outer
+                  page to scroll instead of just this section. */}
+              <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {messages.map((msg, index) => {
                   const isMe = msg.sender._id === currentUserId;
 
@@ -1854,7 +1863,7 @@ const availableUsers = allUsers.filter(
               </section>
 
               {replyingTo && (
-                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3">
+                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3 shrink-0">
                   <div className="text-sm text-gray-300 min-w-0 truncate">
                     Replying to{" "}
                     <span className="text-green-400 font-medium">
@@ -1883,7 +1892,7 @@ const availableUsers = allUsers.filter(
                 </div>
               )}
 
-              <footer className="p-2.5 sm:p-3 lg:p-6 border-t border-gray-800 bg-gray-900/90 backdrop-blur-xl flex items-center space-x-2 sm:space-x-3 lg:space-x-4 shadow-inner">
+              <footer className="p-2.5 sm:p-3 lg:p-6 border-t border-gray-800 bg-gray-900/90 backdrop-blur-xl flex items-center space-x-2 sm:space-x-3 lg:space-x-4 shadow-inner shrink-0">
                 <button
                   className="text-gray-400 hover:text-green-400 transition shrink-0"
                   aria-label="Emoji"
@@ -1962,7 +1971,7 @@ const availableUsers = allUsers.filter(
             </>
           ) : selectedConversation ? (
             <>
-              <header className="flex items-center justify-between p-3 sm:p-4 lg:p-6 border-b border-gray-800 bg-gray-900/90 backdrop-blur-xl shadow-lg gap-2">
+              <header className="flex items-center justify-between p-3 sm:p-4 lg:p-6 border-b border-gray-800 bg-gray-900/90 backdrop-blur-xl shadow-lg gap-2 shrink-0">
                 <div className="flex items-center space-x-2 sm:space-x-3 lg:space-x-4 min-w-0">
                   <button
                     onClick={handleBackToList}
@@ -2045,15 +2054,20 @@ const availableUsers = allUsers.filter(
                 </div>
               </header>
 
-              <section className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
+              {/* ✅ min-h-0 added here too */}
+              <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {privateMessagesLoading ? (
-                  <p className="text-sm text-gray-500 text-center">
-                    Loading messages...
-                  </p>
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-sm text-gray-500">
+                      Loading messages...
+                    </p>
+                  </div>
                 ) : privateMessage.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center">
-                    No messages yet. Say hi 👋
-                  </p>
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-sm text-gray-500 text-center">
+                      No messages yet. Say hi 👋
+                    </p>
+                  </div>
                 ) : (
                   privateMessage.map((msg, index) => {
                     const isMe = msg.sender._id === currentUserId;
@@ -2226,7 +2240,7 @@ const availableUsers = allUsers.filter(
               </section>
 
               {replyingTo && (
-                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3">
+                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3 shrink-0">
                   <div className="text-sm text-gray-300 min-w-0 truncate">
                     Replying to{" "}
                     <span className="text-green-400 font-medium">
@@ -2255,17 +2269,17 @@ const availableUsers = allUsers.filter(
                 </div>
               )}
               {isBlocked ? (
-                <div className="bg-red-800 p-3 text-white">
+                <div className="bg-red-800 p-3 text-white shrink-0">
                   You blocked this user unblock to chat
                 </div>
               ) : blockedMe ? (
-                <div>
+                <div className="shrink-0">
                   <p className="bg-red-800 p-3 text-white">
                     This user has blocked you.
                   </p>
                 </div>
               ) : (
-                <footer className="p-2.5 sm:p-3 lg:p-6 border-t border-gray-800 bg-gray-900/90 backdrop-blur-xl flex items-center space-x-2 sm:space-x-3 lg:space-x-4 shadow-inner">
+                <footer className="p-2.5 sm:p-3 lg:p-6 border-t border-gray-800 bg-gray-900/90 backdrop-blur-xl flex items-center space-x-2 sm:space-x-3 lg:space-x-4 shadow-inner shrink-0">
                   <button
                     className="text-gray-400 hover:text-green-400 transition shrink-0"
                     aria-label="Emoji"
@@ -2449,7 +2463,7 @@ const availableUsers = allUsers.filter(
                 ${showGroupInfo ? "translate-x-0" : "translate-x-full"}
               `}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-6 shrink-0">
                 <h2 className="text-xl font-bold text-green-400 tracking-wide uppercase">
                   Group Info
                 </h2>
@@ -2473,7 +2487,7 @@ const availableUsers = allUsers.filter(
                 </button>
               </div>
 
-              <div className="flex flex-col items-center mb-8">
+              <div className="flex flex-col items-center mb-8 shrink-0">
                 <img
                   src={rizwan}
                   alt="Group"
@@ -2487,7 +2501,7 @@ const availableUsers = allUsers.filter(
                 </p>
               </div>
 
-              <ul className="space-y-4 flex-1 overflow-y-auto">
+              <ul className="space-y-4 flex-1 min-h-0 overflow-y-auto">
                 {selectedRoom.members.map((m) => (
                   <li
                     key={m._id}
@@ -2530,7 +2544,7 @@ const availableUsers = allUsers.filter(
                 ))}
               </ul>
 
-              <div className="mt-6 space-y-3">
+              <div className="mt-6 space-y-3 shrink-0">
                 {selectedRoom.createdBy?._id === currentUserId && (
                   <button
                     onClick={() => setShowAddMemberModal(true)}
@@ -2579,7 +2593,7 @@ const availableUsers = allUsers.filter(
                 ${showChatInfo ? "translate-x-0" : "translate-x-full"}
               `}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-6 shrink-0">
                 <h2 className="text-xl font-bold text-green-400 tracking-wide uppercase">
                   Chat Info
                 </h2>
@@ -2603,7 +2617,7 @@ const availableUsers = allUsers.filter(
                 </button>
               </div>
 
-              <div className="flex flex-col items-center mb-8">
+              <div className="flex flex-col items-center mb-8 shrink-0">
                 <img
                   src={rizwan}
                   alt={selectedUser.name}
@@ -2628,9 +2642,9 @@ const availableUsers = allUsers.filter(
                 )}
               </div>
 
-              <div className="flex-1" />
+              <div className="flex-1 min-h-0" />
 
-              <div className="mt-6 space-y-3">
+              <div className="mt-6 space-y-3 shrink-0">
                 {isBlocked ? (
                   <button
                     className="bg-green-800 p-2  rounded-xl w-70"
@@ -2654,7 +2668,7 @@ const availableUsers = allUsers.filter(
         {showAddMemberModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
             <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]">
-              <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0">
                 <h3 className="text-lg font-bold text-green-400 uppercase tracking-wide">
                   Add Member
                 </h3>
@@ -2678,7 +2692,7 @@ const availableUsers = allUsers.filter(
                 </button>
               </div>
 
-              <ul className="flex-1 overflow-y-auto p-4 space-y-3">
+              <ul className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
                 {availableUsers.length === 0 ? (
                   <p className="text-sm text-gray-500 text-center py-6">
                     No users available to add.
@@ -2705,7 +2719,7 @@ const availableUsers = allUsers.filter(
                 )}
               </ul>
 
-              <div className="p-4 border-t border-gray-800">
+              <div className="p-4 border-t border-gray-800 shrink-0">
                 <button
                   onClick={() => setShowAddMemberModal(false)}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-gray-200 py-2 rounded-lg transition"
