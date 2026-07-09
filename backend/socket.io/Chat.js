@@ -50,12 +50,18 @@ const chatSocket = (io) => {
       });
     });
 
+    // ✅ Fixed: only remove a user from the online map if THIS socket is
+    // still the one on record for them. Without this guard, a race where
+    // a new socket (e.g. after a refresh/reconnect) registers itself
+    // BEFORE the old socket's disconnect event fires would get wiped out
+    // by the old socket's disconnect handler — even though the user is
+    // still actually connected via the new socket. That's what was
+    // causing different clients to disagree about who's online.
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
 
-      if (socket.userId) {
+      if (socket.userId && onlineUsers.get(socket.userId) === socket.id) {
         onlineUsers.delete(socket.userId);
-
         io.emit("onlineUsers", Array.from(onlineUsers.keys()));
       }
     });

@@ -345,50 +345,21 @@ const MainChat = () => {
     });
   }, [messages, privateMessage]);
 
-  // ✅ Mobile viewport height fix — uses the visualViewport API (falls back
-  // to window.innerHeight where unsupported) and exposes the real visible
-  // height as a CSS variable, applied on the root container below.
-  //
-  // Why visualViewport: on iOS Safari, window.innerHeight does NOT shrink
-  // when the on-screen keyboard opens — the keyboard just overlays the page
-  // — so a fix based only on window.resize keeps --app-height at the full
-  // (pre-keyboard) height and the footer input ends up hidden behind the
-  // keyboard. visualViewport.height DOES shrink to the actually-visible
-  // area on both iOS and Android, so the flex column (header/list shrink,
-  // footer shrink-0) recalculates and the input bar lands right above the
-  // keyboard instead of under it.
+  // ✅ Mobile viewport height fix — computes real visible height (excludes
+  // the mobile browser URL bar) and exposes it as a CSS variable, which is
+  // then actually applied on the root container below.
   useEffect(() => {
-    const vv = window.visualViewport;
-
     const setViewportHeight = () => {
-      const height = vv ? vv.height : window.innerHeight;
-      document.documentElement.style.setProperty("--app-height", `${height}px`);
-
-      // Some mobile browsers scroll the page up slightly when the keyboard
-      // opens/closes (visualViewport offsetTop) even though our layout
-      // doesn't scroll internally. Re-pin to the top so nothing drifts.
-      if (vv && vv.offsetTop) {
-        window.scrollTo(0, 0);
-      }
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${window.innerHeight}px`,
+      );
     };
-
     setViewportHeight();
-
-    if (vv) {
-      vv.addEventListener("resize", setViewportHeight);
-      vv.addEventListener("scroll", setViewportHeight);
-    } else {
-      window.addEventListener("resize", setViewportHeight);
-    }
+    window.addEventListener("resize", setViewportHeight);
     window.addEventListener("orientationchange", setViewportHeight);
-
     return () => {
-      if (vv) {
-        vv.removeEventListener("resize", setViewportHeight);
-        vv.removeEventListener("scroll", setViewportHeight);
-      } else {
-        window.removeEventListener("resize", setViewportHeight);
-      }
+      window.removeEventListener("resize", setViewportHeight);
       window.removeEventListener("orientationchange", setViewportHeight);
     };
   }, []);
@@ -1968,12 +1939,6 @@ const MainChat = () => {
                     value={text}
                     type="text"
                     onChange={handleTextChange}
-                    onFocus={(e) =>
-                      setTimeout(
-                        () => e.target.scrollIntoView({ block: "end" }),
-                        100,
-                      )
-                    }
                     onKeyDown={(e) => {
                       if (
                         e.key === "Enter" &&
@@ -2339,12 +2304,6 @@ const MainChat = () => {
                       value={text}
                       type="text"
                       onChange={handleTextChange}
-                      onFocus={(e) =>
-                        setTimeout(
-                          () => e.target.scrollIntoView({ block: "end" }),
-                          100,
-                        )
-                      }
                       onKeyDown={(e) => {
                         if (
                           e.key === "Enter" &&
