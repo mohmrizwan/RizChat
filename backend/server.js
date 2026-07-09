@@ -10,7 +10,7 @@ const server = http.createServer(app);
 // Attach Socket.IO with CORS
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "https://riz-chat.vercel.app"],
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -20,7 +20,9 @@ app.set("io", io);
 chatSocket(io);
 
 // Start server
-server.listen(3000, async () => {
-  console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
   await dbConnect();
 });
