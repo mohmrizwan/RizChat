@@ -14,9 +14,11 @@ const app = express();
 // Middleware
 app.use(cookieParser());
 
+const allowedOrigins = ["http://localhost:5173", "https://riz-chat.vercel.app"];
+
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     credentials: true,
   }),
 );
@@ -30,7 +32,7 @@ app.use(
 app.use("/user", authRoutes);
 app.use("/room", roomRoutes);
 app.use("/message", messageRoutes);
-app.use("/block", blockRoutes)
+app.use("/block", blockRoutes);
 app.use("/privateChat", privateChat);
 
 export default app;
