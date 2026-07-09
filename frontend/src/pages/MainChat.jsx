@@ -1403,7 +1403,7 @@ const MainChat = () => {
           for browsers where the JS hasn't run yet or CSS var is unsupported. */}
       <div
         className="flex w-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-black text-gray-200 font-inter"
-        style={{ height: "var(--app-height, 100dvh)", minHeight: "100vh" }}
+        style={{ height: "var(--app-height, 100dvh)" }}
       >
         {/* ===================== Sidebar (rooms list) ===================== */}
         <aside
