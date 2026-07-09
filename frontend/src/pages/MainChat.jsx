@@ -61,8 +61,7 @@ const MainChat = () => {
   const memberIds = new Set(selectedRoom?.members.map((m) => m._id));
 
   const availableUsers = allUsers.filter(
-    (user) =>
-      !selectedRoom?.members?.some((member) => member._id === user._id),
+    (user) => !selectedRoom?.members?.some((member) => member._id === user._id),
   );
 
   const otherUsers = allUsers.filter((u) => u._id !== currentUserId);
@@ -338,13 +337,24 @@ const MainChat = () => {
     }
   };
 
- useEffect(() => {
-  messagesEndRef.current?.scrollIntoView({
-    behavior: "smooth",
-    block: "nearest",
-  });
-}, [messages, privateMessage]);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [messages, privateMessage]);
 
+  useEffect(() => {
+    const setViewportHeight = () => {
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${window.innerHeight}px`,
+      );
+    };
+    setViewportHeight();
+    window.addEventListener("resize", setViewportHeight);
+    return () => window.removeEventListener("resize", setViewportHeight);
+  }, []);
   const getUsers = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -2058,9 +2068,7 @@ const MainChat = () => {
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {privateMessagesLoading ? (
                   <div className="flex-1 flex items-center justify-center">
-                    <p className="text-sm text-gray-500">
-                      Loading messages...
-                    </p>
+                    <p className="text-sm text-gray-500">Loading messages...</p>
                   </div>
                 ) : privateMessage.length === 0 ? (
                   <div className="flex-1 flex items-center justify-center">
