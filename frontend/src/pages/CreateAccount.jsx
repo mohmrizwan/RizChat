@@ -21,7 +21,7 @@ const CreateAccount = () => {
     try {
       setLoading(true);
 
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+      const API_URL = import.meta.env.VITE_API_URL;
       const response = await axios.post(
         `${API_URL}/user/createAccount`,
         data,

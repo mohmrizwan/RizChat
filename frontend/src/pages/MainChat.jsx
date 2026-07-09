@@ -28,7 +28,7 @@ const MainChat = () => {
   const [allUsers, setAllUsers] = useState([]);
   const token = localStorage.getItem("token");
   const currentUserId = token ? jwtDecode(token).id : null;
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+  const API_URL = import.meta.env.VITE_API_URL;
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [mobileView, setMobileView] = useState("list");
@@ -59,7 +59,14 @@ const MainChat = () => {
   const [showChatInfo, setShowChatInfo] = useState(false);
 
   const memberIds = new Set(selectedRoom?.members.map((m) => m._id));
-  const availableUsers = allUsers.filter((u) => !memberIds.has(u._id));
+  
+const availableUsers = allUsers.filter(
+  (user) =>
+    !selectedRoom?.members?.some(
+      (member) => member._id === user._id
+    )
+);
+
   const otherUsers = allUsers.filter((u) => u._id !== currentUserId);
   const currentUserData = allUsers.find((u) => u._id === currentUserId);
 
@@ -196,6 +203,7 @@ const MainChat = () => {
     }
   };
   const handleAddMember = async (user) => {
+    console.log(API_URL);
     try {
       const token = localStorage.getItem("token");
 
@@ -351,6 +359,7 @@ const MainChat = () => {
       if (response.status === 200) {
         setAllUsers(response.data);
       }
+      // console.log(response.data);
     } catch (error) {
       Swal.fire({
         title: "Error",
