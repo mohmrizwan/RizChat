@@ -5,7 +5,6 @@ import { Link, useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Loader from "../components/Loader";
 import socket, { connectSocket, disconnectSocket } from "../Socket/socket";
-import rizwan from "../assets/images/rizwan.jpg";
 import { jwtDecode } from "jwt-decode";
 
 const MainChat = () => {
@@ -55,10 +54,13 @@ const MainChat = () => {
     return /^https?:\/\//i.test(value) ? value : `${API_URL}/${value}`;
   };
 
+  const getAvatarUrl = (name) =>
+    "https://ui-avatars.com/api/?name=" +
+    encodeURIComponent(name || "?") +
+    "&background=1f2937&color=fff";
+
   // Chat info panel for private chats
   const [showChatInfo, setShowChatInfo] = useState(false);
-
-  const memberIds = new Set(selectedRoom?.members.map((m) => m._id));
 
   const availableUsers = allUsers.filter(
     (user) => !selectedRoom?.members?.some((member) => member._id === user._id),
@@ -200,7 +202,6 @@ const MainChat = () => {
     }
   };
   const handleAddMember = async (user) => {
-    console.log(API_URL);
     try {
       const token = localStorage.getItem("token");
 
@@ -289,7 +290,7 @@ const MainChat = () => {
     }
   };
 
-  // ✅ New: Delete Group (admin only)
+  // ✅ Delete Group (admin only)
   const deleteGroup = async () => {
     if (!selectedRoom) return;
 
@@ -344,6 +345,9 @@ const MainChat = () => {
     });
   }, [messages, privateMessage]);
 
+  // ✅ Mobile viewport height fix — computes real visible height (excludes
+  // the mobile browser URL bar) and exposes it as a CSS variable, which is
+  // then actually applied on the root container below.
   useEffect(() => {
     const setViewportHeight = () => {
       document.documentElement.style.setProperty(
@@ -353,8 +357,13 @@ const MainChat = () => {
     };
     setViewportHeight();
     window.addEventListener("resize", setViewportHeight);
-    return () => window.removeEventListener("resize", setViewportHeight);
+    window.addEventListener("orientationchange", setViewportHeight);
+    return () => {
+      window.removeEventListener("resize", setViewportHeight);
+      window.removeEventListener("orientationchange", setViewportHeight);
+    };
   }, []);
+
   const getUsers = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -368,7 +377,6 @@ const MainChat = () => {
       if (response.status === 200) {
         setAllUsers(response.data);
       }
-      // console.log(response.data);
     } catch (error) {
       Swal.fire({
         title: "Error",
@@ -645,7 +653,7 @@ const MainChat = () => {
     };
   }, [currentUserId]);
 
-  // ✅ New: room deleted by admin (broadcast) — kick everyone out of it
+  // ✅ Room deleted by admin (broadcast) — kick everyone out of it
   useEffect(() => {
     const handleRoomDeleted = ({ roomId }) => {
       setallRooms((prev) => prev.filter((room) => room._id !== roomId));
@@ -1205,7 +1213,7 @@ const MainChat = () => {
     const targetId = selectedConversation?._id || selectedRoom?._id;
     if (!targetId || !currentUserId) return;
 
-    const currentUserName = currentUserData?.name || "Someone"; // ✅ fixed
+    const currentUserName = currentUserData?.name || "Someone";
 
     socket.emit("typing", {
       chatId: targetId,
@@ -1286,7 +1294,6 @@ const MainChat = () => {
       confirmButtonText: "Yes, Block user!",
     });
 
-    // User clicked Cancel
     if (!result.isConfirmed) return;
 
     try {
@@ -1376,17 +1383,32 @@ const MainChat = () => {
       checkStatus();
     }
   }, [selectedUser, unBlockUser]);
+
+  const renderSeenStatus = (msg) =>
+    msg.seen ? (
+      <>
+        Seen <i className="fa-solid fa-check-double text-blue-400"></i>
+      </>
+    ) : (
+      <>
+        Sent <i className="fa-solid fa-check"></i>
+      </>
+    );
+
   return (
     <>
       {loading && <Loader text="Logout your account..." />}
-      {/* ✅ h-dvh (dynamic viewport height) instead of relying only on h-screen —
-          fixes mobile browsers where 100vh includes space behind the URL bar,
-          which was the main cause of the outer page scrollbar. */}
-      <div className="flex h-screen h-dvh w-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-black text-gray-200 font-inter">
+      {/* ✅ Root container now actually uses the --app-height variable set by
+          the resize/orientation listener above, with 100vh/100dvh fallbacks
+          for browsers where the JS hasn't run yet or CSS var is unsupported. */}
+      <div
+        className="flex w-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-black text-gray-200 font-inter"
+        style={{ height: "var(--app-height, 100dvh)", minHeight: "100vh" }}
+      >
         {/* ===================== Sidebar (rooms list) ===================== */}
         <aside
           className={`
-            w-full sm:w-80 md:w-72 lg:w-80 h-full min-h-0 border-r border-gray-800 flex-col bg-gray-900/80 backdrop-blur-xl shrink-0
+            w-full sm:w-72 md:w-80 lg:w-80 h-full min-h-0 border-r border-gray-800 flex-col bg-gray-900/80 backdrop-blur-xl shrink-0
             ${mobileView === "list" ? "flex" : "hidden"} md:flex
           `}
         >
@@ -1396,7 +1418,7 @@ const MainChat = () => {
                 RizChat
               </h2>
               <Link
-                className=" text-white text-lg rounded-4xl p-2 cursor-pointer"
+                className="text-white text-lg rounded-full p-2 hover:bg-gray-800 transition cursor-pointer"
                 to="/profile"
               >
                 <i className="fa-solid fa-ellipsis-vertical"></i>
@@ -1441,10 +1463,6 @@ const MainChat = () => {
             </div>
           </div>
 
-          {/* ✅ min-h-0 forces this flex child to respect the parent's height
-              instead of growing to fit its content — this is what actually
-              routes overflow into this element's own scrollbar instead of
-              bubbling up to the page. */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
             {showChats ? (
               <>
@@ -1471,15 +1489,12 @@ const MainChat = () => {
                             : "bg-gray-800 hover:bg-gray-700"
                         }`}
                       >
-                        {/* Avatar with online dot overlay */}
                         <div className="relative shrink-0">
                           <img
                             src={
                               user.profilePic
                                 ? getMediaUrl(user.profilePic)
-                                : "https://ui-avatars.com/api/?name=" +
-                                  encodeURIComponent(user.name) +
-                                  "&background=1f2937&color=fff"
+                                : getAvatarUrl(user.name)
                             }
                             alt={user.name}
                             className="w-9 h-9 rounded-full object-cover bg-gray-600"
@@ -1540,11 +1555,7 @@ const MainChat = () => {
                         }`}
                       >
                         <img
-                          src={
-                            "https://ui-avatars.com/api/?name=" +
-                            encodeURIComponent(room.roomName) +
-                            "&background=1f2937&color=fff"
-                          }
+                          src={getAvatarUrl(room.roomName)}
                           alt={room.roomName}
                           className="w-10 h-10 rounded-full ring-1 ring-gray-700 shrink-0"
                         />
@@ -1643,11 +1654,7 @@ const MainChat = () => {
                     aria-label="Open group details"
                   >
                     <img
-                      src={
-                        "https://ui-avatars.com/api/?name=" +
-                        encodeURIComponent(selectedRoom.roomName) +
-                        "&background=1f2937&color=fff"
-                      }
+                      src={getAvatarUrl(selectedRoom.roomName)}
                       alt="User"
                       className="w-9 h-9 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-full ring-2 ring-green-400 shadow-lg shrink-0"
                     />
@@ -1694,9 +1701,6 @@ const MainChat = () => {
                 </div>
               </header>
 
-              {/* ✅ min-h-0 added — this is the scrollable message list; without
-                  min-h-0 it would grow past its flex parent and cause the outer
-                  page to scroll instead of just this section. */}
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {messages.map((msg, index) => {
                   const isMe = msg.sender._id === currentUserId;
@@ -1754,7 +1758,6 @@ const MainChat = () => {
                                 : "bg-gray-800 text-white"
                             }`}
                           >
-                            {/* Image */}
                             {msg.mediaType === "image" && msg.media && (
                               <img
                                 src={getMediaUrl(msg.media)}
@@ -1766,7 +1769,6 @@ const MainChat = () => {
                               />
                             )}
 
-                            {/* Video */}
                             {msg.mediaType === "video" && msg.media && (
                               <video
                                 controls
@@ -1794,7 +1796,6 @@ const MainChat = () => {
                               </div>
                             )}
 
-                            {/* Text */}
                             {msg.text && <p>{msg.text}</p>}
                           </div>
 
@@ -1842,21 +1843,8 @@ const MainChat = () => {
                         </div>
 
                         {isMe && (
-                          <span className="text-xs text-gray-400 mt-1">
-                            {isMe && (
-                              <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                {msg.seen ? (
-                                  <>
-                                    Seen{" "}
-                                    <i className="fa-solid fa-check-double text-blue-400"></i>
-                                  </>
-                                ) : (
-                                  <>
-                                    Sent <i className="fa-solid fa-check"></i>
-                                  </>
-                                )}
-                              </span>
-                            )}
+                          <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                            {renderSeenStatus(msg)}
                           </span>
                         )}
                         <p className="text-[10px] text-gray-400 mt-1">
@@ -1910,7 +1898,6 @@ const MainChat = () => {
                   <i className="fa fa-smile-o text-xl"></i>
                 </button>
 
-                {/* File attach button */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -2002,7 +1989,6 @@ const MainChat = () => {
                     </svg>
                   </button>
 
-                  {/* ✅ Now clickable — opens Chat Info panel */}
                   <button
                     onClick={() => setShowChatInfo(true)}
                     className="flex items-center space-x-2 sm:space-x-3 lg:space-x-4 min-w-0 text-left"
@@ -2012,8 +1998,7 @@ const MainChat = () => {
                       src={
                         selectedUser?.profilePic
                           ? getMediaUrl(selectedUser.profilePic)
-                          : "https://ui-avatars.com/api/?name=" +
-                            selectedUser?.name
+                          : getAvatarUrl(selectedUser?.name)
                       }
                       alt="User"
                       className="w-9 h-9 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-full ring-2 ring-green-400 shadow-lg shrink-0"
@@ -2052,7 +2037,6 @@ const MainChat = () => {
                     <span className="text-sm hidden lg:inline">Video</span>
                   </button>
 
-                  {/* ✅ New: Chat Info trigger button */}
                   <button
                     onClick={() => setShowChatInfo(true)}
                     className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
@@ -2064,7 +2048,6 @@ const MainChat = () => {
                 </div>
               </header>
 
-              {/* ✅ min-h-0 added here too */}
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {privateMessagesLoading ? (
                   <div className="flex-1 flex items-center justify-center">
@@ -2080,7 +2063,6 @@ const MainChat = () => {
                   privateMessage.map((msg, index) => {
                     const isMe = msg.sender._id === currentUserId;
 
-                    // ✅ Date divider logic — same toDateString() comparison
                     const currentDate = new Date(msg.createdAt).toDateString();
                     const prevDate =
                       index > 0
@@ -2128,7 +2110,6 @@ const MainChat = () => {
                                   : "bg-gray-800 text-white"
                               }`}
                             >
-                              {/* Image */}
                               {msg.mediaType === "image" && msg.media && (
                                 <img
                                   src={getMediaUrl(msg.media)}
@@ -2140,7 +2121,6 @@ const MainChat = () => {
                                 />
                               )}
 
-                              {/* Video */}
                               {msg.mediaType === "video" && msg.media && (
                                 <video
                                   controls
@@ -2168,7 +2148,6 @@ const MainChat = () => {
                                 </div>
                               )}
 
-                              {/* Text */}
                               {msg.text && <p>{msg.text}</p>}
                             </div>
 
@@ -2216,21 +2195,8 @@ const MainChat = () => {
                           </div>
 
                           {isMe && (
-                            <span className="text-xs text-gray-400 mt-1">
-                              {isMe && (
-                                <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                  {msg.seen ? (
-                                    <>
-                                      Seen{" "}
-                                      <i className="fa-solid fa-check-double text-blue-400"></i>
-                                    </>
-                                  ) : (
-                                    <>
-                                      Sent <i className="fa-solid fa-check"></i>
-                                    </>
-                                  )}
-                                </span>
-                              )}
+                            <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                              {renderSeenStatus(msg)}
                             </span>
                           )}
                           <p className="text-[10px] text-gray-400 mt-1">
@@ -2295,7 +2261,6 @@ const MainChat = () => {
                     <i className="fa fa-smile-o text-xl"></i>
                   </button>
 
-                  {/* File attach button */}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -2370,7 +2335,8 @@ const MainChat = () => {
               )}
             </>
           ) : (
-            <div className="hidden md:flex flex-1 flex-col items-center justify-center text-gray-500 space-y-3">
+            // ✅ Placeholder now visible on mobile too, not just md+
+            <div className="flex flex-1 flex-col items-center justify-center text-gray-500 space-y-3">
               <i className="fa fa-comments text-5xl text-gray-700"></i>
               <p>Select a room to start chatting</p>
             </div>
@@ -2495,9 +2461,10 @@ const MainChat = () => {
                 </button>
               </div>
 
+              {/* ✅ Avatar now matches the header — dynamic, generated from room name */}
               <div className="flex flex-col items-center mb-8 shrink-0">
                 <img
-                  src={rizwan}
+                  src={getAvatarUrl(selectedRoom.roomName)}
                   alt="Group"
                   className="w-20 h-20 rounded-full ring-2 ring-green-400 shadow-lg mb-3"
                 />
@@ -2562,7 +2529,6 @@ const MainChat = () => {
                   </button>
                 )}
 
-                {/* ✅ Admin sees Delete Group, everyone else sees Leave Group */}
                 {selectedRoom.createdBy?._id === currentUserId ? (
                   <button
                     onClick={deleteRoom}
@@ -2625,9 +2591,14 @@ const MainChat = () => {
                 </button>
               </div>
 
+              {/* ✅ Avatar now matches the header — real profile pic or generated fallback */}
               <div className="flex flex-col items-center mb-8 shrink-0">
                 <img
-                  src={rizwan}
+                  src={
+                    selectedUser.profilePic
+                      ? getMediaUrl(selectedUser.profilePic)
+                      : getAvatarUrl(selectedUser.name)
+                  }
                   alt={selectedUser.name}
                   className="w-20 h-20 rounded-full ring-2 ring-green-400 shadow-lg mb-3"
                 />
@@ -2652,20 +2623,21 @@ const MainChat = () => {
 
               <div className="flex-1 min-h-0" />
 
+              {/* ✅ Fixed invalid `w-70` class — buttons now full width like other panel buttons */}
               <div className="mt-6 space-y-3 shrink-0">
                 {isBlocked ? (
                   <button
-                    className="bg-green-800 p-2  rounded-xl w-70"
+                    className="w-full bg-green-800 hover:bg-green-700 p-2.5 rounded-xl transition"
                     onClick={unBlockUser}
                   >
                     Unblock
                   </button>
                 ) : (
                   <button
-                    className="bg-red-800 p-2  rounded-xl w-70"
+                    className="w-full bg-red-800 hover:bg-red-700 p-2.5 rounded-xl transition"
                     onClick={blockUser}
                   >
-                    Block{" "}
+                    Block
                   </button>
                 )}
               </div>
