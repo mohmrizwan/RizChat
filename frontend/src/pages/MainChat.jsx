@@ -47,7 +47,21 @@ const MainChat = () => {
   const [typingUser, setTypingUser] = useState(null); // userId currently typing in open chat
   const [roomActivity, setRoomActivity] = useState({});
   const [privateChatActivity, setPrivateChatActivity] = useState({});
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
   const [conversationUserMap, setConversationUserMap] = useState({});
+
+  // ✅ NEW: loading states for every API call that previously had none
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [joinRoomLoading, setJoinRoomLoading] = useState(false);
+  const [leaveRoomLoading, setLeaveRoomLoading] = useState(false);
+  const [deleteRoomLoading, setDeleteRoomLoading] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
+  const [addMemberLoading, setAddMemberLoading] = useState(false);
+  const [removeMemberLoading, setRemoveMemberLoading] = useState(null); // stores memberId being removed
 
   const getMediaUrl = (value) => {
     if (!value) return null;
@@ -201,8 +215,10 @@ const MainChat = () => {
       });
     }
   };
+
   const handleAddMember = async (user) => {
     try {
+      setAddMemberLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.post(
@@ -239,6 +255,8 @@ const MainChat = () => {
         title: "Error",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setAddMemberLoading(false);
     }
   };
 
@@ -258,6 +276,7 @@ const MainChat = () => {
     if (!confirmResult.isConfirmed) return;
 
     try {
+      setRemoveMemberLoading(member._id);
       const token = localStorage.getItem("token");
 
       const response = await axios.post(
@@ -287,6 +306,8 @@ const MainChat = () => {
         title: "Error",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setRemoveMemberLoading(null);
     }
   };
 
@@ -307,6 +328,7 @@ const MainChat = () => {
     if (!confirmResult.isConfirmed) return;
 
     try {
+      setDeleteRoomLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.delete(
@@ -335,6 +357,8 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setDeleteRoomLoading(false);
     }
   };
 
@@ -366,6 +390,7 @@ const MainChat = () => {
 
   const getUsers = async () => {
     try {
+      setUsersLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.get(`${API_URL}/user/allUsers`, {
@@ -383,6 +408,8 @@ const MainChat = () => {
         text: error.response?.data?.message || "Something went wrong",
         icon: "error",
       });
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -752,6 +779,7 @@ const MainChat = () => {
 
   const getRooms = async () => {
     try {
+      setRoomsLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.get(`${API_URL}/room/allRooms`, {
@@ -762,6 +790,8 @@ const MainChat = () => {
       setallRooms(response.data.myRooms);
     } catch (error) {
       console.log(error);
+    } finally {
+      setRoomsLoading(false);
     }
   };
 
@@ -771,6 +801,7 @@ const MainChat = () => {
 
   const joinRoom = async () => {
     try {
+      setJoinRoomLoading(true);
       let token = localStorage.getItem("token");
 
       const response = await axios.post(
@@ -802,11 +833,14 @@ const MainChat = () => {
         text: error.response?.data?.message || "Something went wrong",
       });
       setShowJoinRoom(false);
+    } finally {
+      setJoinRoomLoading(false);
     }
   };
 
   const leaveRoom = async () => {
     try {
+      setLeaveRoomLoading(true);
       let token = localStorage.getItem("token");
       const response = await axios.post(
         `${API_URL}/room/leaveRoom`,
@@ -836,8 +870,11 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setLeaveRoomLoading(false);
     }
   };
+
   const deleteRoom = async () => {
     let result = await Swal.fire({
       title: "Are you sure?",
@@ -850,6 +887,7 @@ const MainChat = () => {
     });
     if (!result.isConfirmed) return;
     try {
+      setDeleteRoomLoading(true);
       let token = localStorage.getItem("token");
       const response = await axios.delete(
         `${API_URL}/room/deleteRoom/${selectedRoom._id}`,
@@ -865,6 +903,12 @@ const MainChat = () => {
           icon: "success",
           text: response.data.message,
         });
+        // ✅ cleanup so UI doesn't keep showing a room that no longer exists
+        setSelectedRoom(null);
+        setMessages([]);
+        setMobileView("list");
+        setShowGroupInfo(false);
+        getRooms();
       }
     } catch (error) {
       if (error.response?.status === 500) {
@@ -874,11 +918,15 @@ const MainChat = () => {
           text: error.response.data.message,
         });
       }
+    } finally {
+      setDeleteRoomLoading(false);
     }
   };
+
   const sendMessage = async () => {
     if (!selectedRoom || (text.trim() === "" && !selectedFile)) return;
     try {
+      setSendingMessage(true);
       const token = localStorage.getItem("token");
       const formData = new FormData();
 
@@ -920,11 +968,14 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setSendingMessage(false);
     }
   };
 
   const getMessages = async () => {
     try {
+      setMessagesLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.get(
@@ -942,6 +993,8 @@ const MainChat = () => {
       }
     } catch (error) {
       console.log(error);
+    } finally {
+      setMessagesLoading(false);
     }
   };
 
@@ -1054,6 +1107,7 @@ const MainChat = () => {
   const handleBackToList = () => {
     setMobileView("list");
   };
+
   const openPrivateChat = async (user) => {
     try {
       const token = localStorage.getItem("token");
@@ -1155,6 +1209,7 @@ const MainChat = () => {
       return;
     }
     try {
+      setSendingMessage(true);
       const token = localStorage.getItem("token");
       const formData = new FormData();
 
@@ -1203,6 +1258,8 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -1244,6 +1301,7 @@ const MainChat = () => {
       sendMessage();
     }
   };
+
   const markPrivateSeen = async (conversationId) => {
     try {
       const token = localStorage.getItem("token");
@@ -1297,6 +1355,7 @@ const MainChat = () => {
     if (!result.isConfirmed) return;
 
     try {
+      setBlockLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.post(
@@ -1329,8 +1388,11 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setBlockLoading(false);
     }
   };
+
   const checkStatus = async () => {
     const token = localStorage.getItem("token");
 
@@ -1349,6 +1411,7 @@ const MainChat = () => {
 
   const unBlockUser = async () => {
     try {
+      setBlockLoading(true);
       let token = localStorage.getItem("token");
       const response = await axios.post(
         `${API_URL}/block/unblockUser/${selectedUser._id}`,
@@ -1376,8 +1439,11 @@ const MainChat = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setBlockLoading(false);
     }
   };
+
   useEffect(() => {
     if (selectedUser) {
       checkStatus();
@@ -1413,17 +1479,55 @@ const MainChat = () => {
           `}
         >
           <div className="p-4 sm:p-6 border-b border-gray-800 shrink-0">
-            <div className="flex justify-between">
-              <h2 className="text-xl font-bold text-green-400 tracking-wide flex items-center ">
+            <div className="flex justify-between relative" ref={menuRef}>
+              <h2 className="text-xl font-bold text-green-400 tracking-wide flex items-center">
                 RizChat
               </h2>
-              <Link
+
+              <button
+                onClick={() => setMenuOpen((prev) => !prev)}
                 className="text-white text-lg rounded-full p-2 hover:bg-gray-800 transition cursor-pointer"
-                to="/profile"
               >
                 <i className="fa-solid fa-ellipsis-vertical"></i>
-              </Link>
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 top-10 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden z-50">
+                  <Link
+                    to="/profile"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                  >
+                    Profile
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowCreateRoom(true);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                  >
+                    Create Room
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowJoinRoom(true);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                  >
+                    Join Room
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 transition"
+                  >
+                    Logout
+                  </button>
+                </div>
+              )}
             </div>
+
             <input
               type="text"
               placeholder="Search..."
@@ -1467,7 +1571,9 @@ const MainChat = () => {
             {showChats ? (
               <>
                 <h3 className="text-sm uppercase text-gray-400 mb-2">Chats</h3>
-                {sortedUsers.length === 0 ? (
+                {usersLoading ? (
+                  <p className="text-sm text-gray-500">Loading chats...</p>
+                ) : sortedUsers.length === 0 ? (
                   <p className="text-sm text-gray-500">
                     {searchQuery
                       ? `No users found for "${searchQuery}"`
@@ -1535,7 +1641,9 @@ const MainChat = () => {
             ) : (
               <>
                 <h3 className="text-sm uppercase text-gray-400 mb-2">Groups</h3>
-                {sortedRooms.length === 0 ? (
+                {roomsLoading ? (
+                  <p className="text-sm text-gray-500">Loading groups...</p>
+                ) : sortedRooms.length === 0 ? (
                   <p className="text-sm text-gray-500">
                     No groups yet {searchQuery && `for "${searchQuery}"`}.
                   </p>
@@ -1587,35 +1695,7 @@ const MainChat = () => {
             )}
           </div>
 
-          <div className="p-4 border-t border-gray-800 space-y-3 shrink-0">
-            <button
-              onClick={() => setShowCreateRoom(true)}
-              className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg shadow-md"
-            >
-              Create Room
-            </button>
-            <button
-              onClick={() => setShowJoinRoom(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg shadow-md"
-            >
-              Join Group
-            </button>
-            <button
-              type="submit"
-              onClick={handleLogout}
-              disabled={loading}
-              className="w-full flex items-center justify-center bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 text-white font-semibold py-3 rounded-xl shadow-lg transition-transform transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  Logout Account...
-                </>
-              ) : (
-                "Logout "
-              )}
-            </button>
-          </div>
+        
         </aside>
 
         {/* ===================== Main chat column ===================== */}
@@ -1702,162 +1782,170 @@ const MainChat = () => {
               </header>
 
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
-                {messages.map((msg, index) => {
-                  const isMe = msg.sender._id === currentUserId;
+                {messagesLoading ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-sm text-gray-500">Loading messages...</p>
+                  </div>
+                ) : (
+                  <>
+                    {messages.map((msg, index) => {
+                      const isMe = msg.sender._id === currentUserId;
 
-                  const currentDate = new Date(msg.createdAt).toDateString();
-                  const prevDate =
-                    index > 0
-                      ? new Date(messages[index - 1].createdAt).toDateString()
-                      : null;
-                  const showDateDivider = currentDate !== prevDate;
+                      const currentDate = new Date(msg.createdAt).toDateString();
+                      const prevDate =
+                        index > 0
+                          ? new Date(messages[index - 1].createdAt).toDateString()
+                          : null;
+                      const showDateDivider = currentDate !== prevDate;
 
-                  const today = new Date().toDateString();
-                  const yesterday = new Date(
-                    Date.now() - 86400000,
-                  ).toDateString();
-                  const dateLabel =
-                    currentDate === today
-                      ? "Today"
-                      : currentDate === yesterday
-                        ? "Yesterday"
-                        : currentDate;
+                      const today = new Date().toDateString();
+                      const yesterday = new Date(
+                        Date.now() - 86400000,
+                      ).toDateString();
+                      const dateLabel =
+                        currentDate === today
+                          ? "Today"
+                          : currentDate === yesterday
+                            ? "Yesterday"
+                            : currentDate;
 
-                  return (
-                    <React.Fragment key={msg._id}>
-                      {showDateDivider && (
-                        <div className="flex justify-center my-3">
-                          <span className="text-xs text-gray-400 bg-gray-800 px-3 py-1 rounded-full shadow-md">
-                            {dateLabel}
-                          </span>
-                        </div>
-                      )}
+                      return (
+                        <React.Fragment key={msg._id}>
+                          {showDateDivider && (
+                            <div className="flex justify-center my-3">
+                              <span className="text-xs text-gray-400 bg-gray-800 px-3 py-1 rounded-full shadow-md">
+                                {dateLabel}
+                              </span>
+                            </div>
+                          )}
 
-                      <div
-                        className={`flex flex-col group ${
-                          isMe ? "items-end" : "items-start"
-                        }`}
-                      >
-                        <p
-                          className={`text-xs mb-1 ${
-                            isMe ? "text-green-400 text-right" : "text-blue-400"
-                          }`}
-                        >
-                          {msg.sender.name}
-                        </p>
-
-                        <div
-                          className={`flex items-center gap-2 max-w-[88%] sm:max-w-[75%] md:max-w-sm lg:max-w-md ${
-                            isMe ? "flex-row-reverse" : "flex-row"
-                          }`}
-                        >
                           <div
-                            className={`px-3.5 sm:px-4 lg:px-5 py-2 sm:py-2.5 lg:py-3 rounded-2xl shadow-md break-words ${
-                              isMe
-                                ? "bg-gradient-to-r from-green-500 to-green-700 text-white"
-                                : "bg-gray-800 text-white"
+                            className={`flex flex-col group ${
+                              isMe ? "items-end" : "items-start"
                             }`}
                           >
-                            {msg.mediaType === "image" && msg.media && (
-                              <img
-                                src={getMediaUrl(msg.media)}
-                                alt="Chat"
-                                onClick={() =>
-                                  setPreviewImage(getMediaUrl(msg.media))
-                                }
-                                className="rounded-lg max-w-[250px] mb-2 cursor-pointer hover:opacity-90 transition"
-                              />
-                            )}
-
-                            {msg.mediaType === "video" && msg.media && (
-                              <video
-                                controls
-                                className="rounded-lg max-w-[250px] mb-2"
-                              >
-                                <source
-                                  src={getMediaUrl(msg.media)}
-                                  type="video/mp4"
-                                />
-                              </video>
-                            )}
-
-                            {msg.replyTo && (
-                              <div className="mb-2 rounded-lg border border-gray-700/70 bg-black/20 px-2.5 py-1.5 text-[11px] text-gray-300">
-                                <p className="text-[10px] uppercase tracking-wide text-green-400">
-                                  Replying to{" "}
-                                  {msg.replyTo.sender?.name || "a message"}
-                                </p>
-                                <p className="mt-1 truncate">
-                                  {msg.replyTo.text ||
-                                    (msg.replyTo.media
-                                      ? "Media message"
-                                      : "Message")}
-                                </p>
-                              </div>
-                            )}
-
-                            {msg.text && <p>{msg.text}</p>}
-                          </div>
-
-                          <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => handleReply(msg)}
-                              className="text-gray-400 hover:text-green-400 p-1.5 rounded-full hover:bg-gray-800 transition"
-                              aria-label="Reply"
+                            <p
+                              className={`text-xs mb-1 ${
+                                isMe ? "text-green-400 text-right" : "text-blue-400"
+                              }`}
                             >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                className="h-4 w-4"
-                                viewBox="0 0 20 20"
-                                fill="currentColor"
+                              {msg.sender.name}
+                            </p>
+
+                            <div
+                              className={`flex items-center gap-2 max-w-[88%] sm:max-w-[75%] md:max-w-sm lg:max-w-md ${
+                                isMe ? "flex-row-reverse" : "flex-row"
+                              }`}
+                            >
+                              <div
+                                className={`px-3.5 sm:px-4 lg:px-5 py-2 sm:py-2.5 lg:py-3 rounded-2xl shadow-md break-words ${
+                                  isMe
+                                    ? "bg-gradient-to-r from-green-500 to-green-700 text-white"
+                                    : "bg-gray-800 text-white"
+                                }`}
                               >
-                                <path
-                                  fillRule="evenodd"
-                                  d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                                  clipRule="evenodd"
-                                />
-                              </svg>
-                            </button>
+                                {msg.mediaType === "image" && msg.media && (
+                                  <img
+                                    src={getMediaUrl(msg.media)}
+                                    alt="Chat"
+                                    onClick={() =>
+                                      setPreviewImage(getMediaUrl(msg.media))
+                                    }
+                                    className="rounded-lg max-w-[250px] mb-2 cursor-pointer hover:opacity-90 transition"
+                                  />
+                                )}
+
+                                {msg.mediaType === "video" && msg.media && (
+                                  <video
+                                    controls
+                                    className="rounded-lg max-w-[250px] mb-2"
+                                  >
+                                    <source
+                                      src={getMediaUrl(msg.media)}
+                                      type="video/mp4"
+                                    />
+                                  </video>
+                                )}
+
+                                {msg.replyTo && (
+                                  <div className="mb-2 rounded-lg border border-gray-700/70 bg-black/20 px-2.5 py-1.5 text-[11px] text-gray-300">
+                                    <p className="text-[10px] uppercase tracking-wide text-green-400">
+                                      Replying to{" "}
+                                      {msg.replyTo.sender?.name || "a message"}
+                                    </p>
+                                    <p className="mt-1 truncate">
+                                      {msg.replyTo.text ||
+                                        (msg.replyTo.media
+                                          ? "Media message"
+                                          : "Message")}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {msg.text && <p>{msg.text}</p>}
+                              </div>
+
+                              <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition flex items-center gap-1 shrink-0">
+                                <button
+                                  onClick={() => handleReply(msg)}
+                                  className="text-gray-400 hover:text-green-400 p-1.5 rounded-full hover:bg-gray-800 transition"
+                                  aria-label="Reply"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-4 w-4"
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                  >
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                </button>
+
+                                {isMe && (
+                                  <button
+                                    onClick={() => handleDelete(msg._id)}
+                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-gray-800 transition"
+                                    aria-label="Delete"
+                                  >
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="h-4 w-4"
+                                      viewBox="0 0 20 20"
+                                      fill="currentColor"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M9 2a1 1 0 00-1 1v1H4a1 1 0 000 2h12a1 1 0 100-2h-4V3a1 1 0 00-1-1H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
 
                             {isMe && (
-                              <button
-                                onClick={() => handleDelete(msg._id)}
-                                className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-gray-800 transition"
-                                aria-label="Delete"
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="h-4 w-4"
-                                  viewBox="0 0 20 20"
-                                  fill="currentColor"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M9 2a1 1 0 00-1 1v1H4a1 1 0 000 2h12a1 1 0 100-2h-4V3a1 1 0 00-1-1H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
-                              </button>
+                              <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                                {renderSeenStatus(msg)}
+                              </span>
                             )}
+                            <p className="text-[10px] text-gray-400 mt-1">
+                              {new Date(msg.createdAt).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
                           </div>
-                        </div>
-
-                        {isMe && (
-                          <span className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                            {renderSeenStatus(msg)}
-                          </span>
-                        )}
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          {new Date(msg.createdAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
-                <div ref={messagesEndRef}></div>
+                        </React.Fragment>
+                      );
+                    })}
+                    <div ref={messagesEndRef}></div>
+                  </>
+                )}
               </section>
 
               {replyingTo && (
@@ -1954,15 +2042,19 @@ const MainChat = () => {
                 <button
                   onClick={handleSend}
                   disabled={
-                    !selectedRoom || (text.trim() === "" && !selectedFile)
+                    !selectedRoom ||
+                    (text.trim() === "" && !selectedFile) ||
+                    sendingMessage
                   }
                   className={`px-3 sm:px-4 py-2 rounded-lg text-white shrink-0 ${
-                    !selectedRoom || (text.trim() === "" && !selectedFile)
+                    !selectedRoom ||
+                    (text.trim() === "" && !selectedFile) ||
+                    sendingMessage
                       ? "bg-gray-600 cursor-not-allowed"
                       : "bg-green-600 hover:bg-green-700"
                   }`}
                 >
-                  Send
+                  {sendingMessage ? "Sending..." : "Send"}
                 </button>
               </footer>
             </>
@@ -2320,16 +2412,18 @@ const MainChat = () => {
                     onClick={handleSend}
                     disabled={
                       (!selectedConversation && !selectedRoom) ||
-                      (text.trim() === "" && !selectedFile)
+                      (text.trim() === "" && !selectedFile) ||
+                      sendingMessage
                     }
                     className={`px-3 sm:px-4 py-2 rounded-lg text-white shrink-0 ${
                       (!selectedConversation && !selectedRoom) ||
-                      (text.trim() === "" && !selectedFile)
+                      (text.trim() === "" && !selectedFile) ||
+                      sendingMessage
                         ? "bg-gray-600 cursor-not-allowed"
                         : "bg-green-600 hover:bg-green-700"
                     }`}
                   >
-                    Send
+                    {sendingMessage ? "Sending..." : "Send"}
                   </button>
                 </footer>
               )}
@@ -2499,20 +2593,30 @@ const MainChat = () => {
                       selectedRoom.createdBy._id !== m._id && (
                         <button
                           onClick={() => removeMember(m)}
-                          className="bg-red-800 rounded-full p-2 text-white transition hover:bg-red-700"
+                          disabled={removeMemberLoading === m._id}
+                          className="bg-red-800 rounded-full p-2 text-white transition hover:bg-red-700 disabled:opacity-50"
                           aria-label={`Remove ${m.name}`}
                         >
-                          <i className="fa-solid fa-user-slash"></i>
+                          {removeMemberLoading === m._id ? (
+                            <i className="fa-solid fa-spinner fa-spin"></i>
+                          ) : (
+                            <i className="fa-solid fa-user-slash"></i>
+                          )}
                         </button>
                       )}
                     {selectedRoom.createdBy._id !== currentUserId &&
                       m._id === currentUserId && (
                         <button
                           onClick={leaveRoom}
-                          className="bg-red-800 rounded-full p-2 text-white transition hover:bg-red-700"
+                          disabled={leaveRoomLoading}
+                          className="bg-red-800 rounded-full p-2 text-white transition hover:bg-red-700 disabled:opacity-50"
                           aria-label="Leave room"
                         >
-                          <i className="fa-solid fa-right-from-bracket"></i>
+                          {leaveRoomLoading ? (
+                            <i className="fa-solid fa-spinner fa-spin"></i>
+                          ) : (
+                            <i className="fa-solid fa-right-from-bracket"></i>
+                          )}
                         </button>
                       )}
                   </li>
@@ -2532,16 +2636,18 @@ const MainChat = () => {
                 {selectedRoom.createdBy?._id === currentUserId ? (
                   <button
                     onClick={deleteRoom}
-                    className="w-full bg-red-600/80 hover:bg-red-600 text-white py-2 rounded-lg shadow-md transition"
+                    disabled={deleteRoomLoading}
+                    className="w-full bg-red-600/80 hover:bg-red-600 text-white py-2 rounded-lg shadow-md transition disabled:opacity-50"
                   >
-                    Delete Group
+                    {deleteRoomLoading ? "Deleting..." : "Delete Group"}
                   </button>
                 ) : (
                   <button
                     onClick={leaveRoom}
-                    className="w-full bg-red-600/80 hover:bg-red-600 text-white py-2 rounded-lg shadow-md transition"
+                    disabled={leaveRoomLoading}
+                    className="w-full bg-red-600/80 hover:bg-red-600 text-white py-2 rounded-lg shadow-md transition disabled:opacity-50"
                   >
-                    Leave Group
+                    {leaveRoomLoading ? "Leaving..." : "Leave Group"}
                   </button>
                 )}
               </div>
@@ -2627,17 +2733,19 @@ const MainChat = () => {
               <div className="mt-6 space-y-3 shrink-0">
                 {isBlocked ? (
                   <button
-                    className="w-full bg-green-800 hover:bg-green-700 p-2.5 rounded-xl transition"
+                    className="w-full bg-green-800 hover:bg-green-700 p-2.5 rounded-xl transition disabled:opacity-50"
                     onClick={unBlockUser}
+                    disabled={blockLoading}
                   >
-                    Unblock
+                    {blockLoading ? "Unblocking..." : "Unblock"}
                   </button>
                 ) : (
                   <button
-                    className="w-full bg-red-800 hover:bg-red-700 p-2.5 rounded-xl transition"
+                    className="w-full bg-red-800 hover:bg-red-700 p-2.5 rounded-xl transition disabled:opacity-50"
                     onClick={blockUser}
+                    disabled={blockLoading}
                   >
-                    Block
+                    {blockLoading ? "Blocking..." : "Block"}
                   </button>
                 )}
               </div>
@@ -2690,9 +2798,10 @@ const MainChat = () => {
                       </div>
                       <button
                         onClick={() => handleAddMember(u)}
-                        className="text-xs font-semibold bg-green-600/80 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition"
+                        disabled={addMemberLoading}
+                        className="text-xs font-semibold bg-green-600/80 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                       >
-                        Add
+                        {addMemberLoading ? "Adding..." : "Add"}
                       </button>
                     </li>
                   ))
@@ -2770,15 +2879,17 @@ const MainChat = () => {
                   setShowJoinRoom(false);
                   setroomCode("");
                 }}
-                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300"
+                disabled={joinRoomLoading}
+                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={joinRoom}
-                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={joinRoomLoading}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
               >
-                Join
+                {joinRoomLoading ? "Joining..." : "Join"}
               </button>
             </div>
           </div>
