@@ -12,6 +12,7 @@ const MainChat = () => {
   const [loading, setLoading] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const textInputRef = useRef(null); // ✅ lets us keep focus on the input so mobile keyboard stays open after sending
   const [voiceCall, setVoiceCall] = useState(false);
   const [videoCall, setVideoCall] = useState(false);
   const [showChats, setShowChats] = useState(true);
@@ -369,21 +370,41 @@ const MainChat = () => {
     });
   }, [messages, privateMessage]);
 
-  // ✅ Mobile viewport height fix — computes real visible height (excludes
-  // the mobile browser URL bar) and exposes it as a CSS variable, which is
-  // then actually applied on the root container below.
+  // ✅ Mobile viewport height fix — uses the visualViewport API (when
+  // available) instead of window.innerHeight. window.innerHeight does NOT
+  // shrink when the on-screen keyboard opens on most mobile browsers, which
+  // is why the footer/input used to end up hidden behind the keyboard.
+  // visualViewport.height DOES shrink, so the chat column resizes to fit
+  // exactly the visible area above the keyboard, keeping everything aligned.
   useEffect(() => {
+    const vv = window.visualViewport;
+
     const setViewportHeight = () => {
-      document.documentElement.style.setProperty(
-        "--app-height",
-        `${window.innerHeight}px`,
-      );
+      const height = vv ? vv.height : window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", `${height}px`);
+      // keep the latest message pinned to the bottom, above the keyboard
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ block: "end" });
+      });
     };
+
     setViewportHeight();
-    window.addEventListener("resize", setViewportHeight);
+
+    if (vv) {
+      vv.addEventListener("resize", setViewportHeight);
+      vv.addEventListener("scroll", setViewportHeight);
+    } else {
+      window.addEventListener("resize", setViewportHeight);
+    }
     window.addEventListener("orientationchange", setViewportHeight);
+
     return () => {
-      window.removeEventListener("resize", setViewportHeight);
+      if (vv) {
+        vv.removeEventListener("resize", setViewportHeight);
+        vv.removeEventListener("scroll", setViewportHeight);
+      } else {
+        window.removeEventListener("resize", setViewportHeight);
+      }
       window.removeEventListener("orientationchange", setViewportHeight);
     };
   }, []);
@@ -1300,6 +1321,12 @@ const MainChat = () => {
     } else if (selectedRoom) {
       sendMessage();
     }
+
+    // ✅ keep the mobile keyboard open after sending — without this, focus
+    // drifts to the Send button and the keyboard collapses after every message
+    requestAnimationFrame(() => {
+      textInputRef.current?.focus();
+    });
   };
 
   const markPrivateSeen = async (conversationId) => {
@@ -2024,6 +2051,7 @@ const MainChat = () => {
                     </div>
                   )}
                   <input
+                    ref={textInputRef}
                     value={text}
                     type="text"
                     onChange={handleTextChange}
@@ -2041,6 +2069,7 @@ const MainChat = () => {
 
                 <button
                   onClick={handleSend}
+                  onMouseDown={(e) => e.preventDefault()}
                   disabled={
                     !selectedRoom ||
                     (text.trim() === "" && !selectedFile) ||
@@ -2393,6 +2422,7 @@ const MainChat = () => {
                       </div>
                     )}
                     <input
+                      ref={textInputRef}
                       value={text}
                       type="text"
                       onChange={handleTextChange}
@@ -2410,6 +2440,7 @@ const MainChat = () => {
 
                   <button
                     onClick={handleSend}
+                    onMouseDown={(e) => e.preventDefault()}
                     disabled={
                       (!selectedConversation && !selectedRoom) ||
                       (text.trim() === "" && !selectedFile) ||
