@@ -9,7 +9,6 @@ import messageRoutes from "./routes/messageRoutes.js";
 import privateChat from "./routes/conversationRoutes.js";
 import blockRoutes from "./routes/blockRoutes.js";
 
-
 const app = express();
 
 // Middleware
@@ -29,6 +28,12 @@ app.use(
     extended: true,
   }),
 );
+console.log({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  secret_last_4: process.env.CLOUDINARY_API_SECRET?.slice(-4),
+  secret_length: process.env.CLOUDINARY_API_SECRET?.length,
+});
 
 app.use("/user", authRoutes);
 app.use("/room", roomRoutes);
