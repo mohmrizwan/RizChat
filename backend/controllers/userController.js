@@ -89,7 +89,7 @@ export const loginUser = async (req, res) => {
 };
 
 export const Logout = async (req, res) => {
-  return res.status(200).json({ message: "Your account is loggoed out" });
+  return res.status(200).json({ message: "Your account is logged out" });
 };
 
 export const getAllUsers = async (req, res) => {
@@ -132,7 +132,7 @@ export const updateUser = async (req, res) => {
 
     if (req.file) {
       const uploadResult = await uploadToCloudinary(req.file.buffer, {
-        folder: "rizchat/profile-pics",
+        folder: "rizchat/profilePics",
         resource_type: "image",
       });
       updateData.profilePic = uploadResult.secure_url;

@@ -6,7 +6,7 @@ import Swal from "sweetalert2";
 
 const UserProfile = () => {
   const token = localStorage.getItem("token");
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+  const API_URL = import.meta.env.VITE_API_URL;
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);

@@ -22,10 +22,7 @@ const Login = () => {
       setLoading(true);
 
       const API_URL = import.meta.env.VITE_API_URL;
-      const response = await axios.post(
-        `${API_URL}/user/login`,
-        data,
-      );
+      const response = await axios.post(`${API_URL}/user/login`, data);
 
       if (response.status === 200) {
         Swal.fire({
@@ -118,6 +115,10 @@ const Login = () => {
                   className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
                   {...register("password", {
                     required: "Password is required",
+                    minLength: {
+                      value: 3,
+                      message: " Password must be at least 3 characters long",
+                    },
                   })}
                 />
 
