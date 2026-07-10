@@ -14,6 +14,10 @@ const UserProfile = () => {
   const [user, setUser] = useState([]);
   const [refresh, setRefresh] = useState(false);
 
+  // ✅ NEW: loading states for the two API calls in this file
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+
   const getMediaUrl = (value) => {
     if (!value) return null;
     return /^https?:\/\//i.test(value) ? value : `${API_URL}/${value}`;
@@ -21,6 +25,7 @@ const UserProfile = () => {
 
   const submitCall = async () => {
     try {
+      setSaveLoading(true);
       const formData = new FormData();
 
       formData.append("name", name);
@@ -53,6 +58,8 @@ const UserProfile = () => {
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -62,6 +69,7 @@ const UserProfile = () => {
 
   const getProfile = async () => {
     try {
+      setProfileLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.get(`${API_URL}/user/profile`, {
@@ -71,9 +79,12 @@ const UserProfile = () => {
       });
 
       setUser(response.data.user);
+      setName(response.data.user?.name || "");
       // console.log(response.data.user);
     } catch (error) {
       console.log(error);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -119,7 +130,7 @@ const UserProfile = () => {
           </Link>
 
           {/* Edit toggle */}
-          {!isEditing && (
+          {!isEditing && !profileLoading && (
             <button
               onClick={() => setIsEditing(true)}
               className="absolute top-4 right-4 flex items-center gap-1.5 bg-gray-950/60 hover:bg-gray-800 text-gray-200 text-xs font-medium px-3.5 py-2 rounded-full shadow-md ring-1 ring-white/5 transition hover:scale-105"
@@ -133,11 +144,21 @@ const UserProfile = () => {
           <div className="absolute -bottom-12 left-6">
             <div className="relative">
               <div className="w-24 h-24 rounded-full ring-[3px] ring-gray-900 shadow-[0_0_0_4px_rgba(74,222,128,0.15)] overflow-hidden bg-gray-800 flex items-center justify-center">
-                <img
-                  src={user.profilePic ? getMediaUrl(user.profilePic) : rizwan}
-                  alt="Profile"
-                  className="w-full h-full object-cover"
-                />
+                {profileLoading ? (
+                  <i className="fa fa-spinner fa-spin text-green-400 text-xl"></i>
+                ) : (
+                  <img
+                    src={
+                      selectedFile
+                        ? preview
+                        : user.profilePic
+                          ? getMediaUrl(user.profilePic)
+                          : rizwan
+                    }
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                )}
               </div>
 
               {/* Online dot */}
@@ -169,7 +190,32 @@ const UserProfile = () => {
 
         {/* ===== Body ===== */}
         <div className="pt-16 px-7 pb-7">
-          {!isEditing ? (
+          {profileLoading ? (
+            /* ---------------- LOADING STATE ---------------- */
+            <div className="space-y-6 animate-pulse">
+              <div className="space-y-2">
+                <div className="h-5 w-32 bg-gray-800 rounded" />
+                <div className="h-3 w-20 bg-gray-800 rounded" />
+              </div>
+              <div className="h-px bg-gray-800" />
+              <div className="space-y-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-gray-800 shrink-0" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-2.5 w-14 bg-gray-800 rounded" />
+                    <div className="h-3.5 w-40 bg-gray-800 rounded" />
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-gray-800 shrink-0" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-2.5 w-14 bg-gray-800 rounded" />
+                    <div className="h-3.5 w-full bg-gray-800 rounded" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : !isEditing ? (
             /* ---------------- VIEW MODE ---------------- */
             <div className="space-y-6">
               <div>
@@ -232,7 +278,8 @@ const UserProfile = () => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Your name"
-                  className="w-full bg-gray-800/30 text-gray-500 rounded-xl px-4 py-3 outline-none border border-gray-800"
+                  disabled={saveLoading}
+                  className="w-full bg-gray-800/30 text-gray-500 rounded-xl px-4 py-3 outline-none border border-gray-800 disabled:opacity-50"
                 />
               </div>
 
@@ -253,17 +300,23 @@ const UserProfile = () => {
 
               <div className="flex gap-3 pt-2">
                 <button
+                  type="button"
                   onClick={() => setIsEditing(false)}
+                  disabled={saveLoading}
                   // TODO: reset drafts back to original values here
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-3 rounded-xl shadow-md transition"
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-3 rounded-xl shadow-md transition disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl"
+                  disabled={saveLoading}
+                  className="flex-1 bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Save changes
+                  {saveLoading && (
+                    <i className="fa fa-spinner fa-spin"></i>
+                  )}
+                  {saveLoading ? "Saving..." : "Save changes"}
                 </button>
               </div>
             </form>

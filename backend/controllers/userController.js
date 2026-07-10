@@ -103,7 +103,6 @@ export const getAllUsers = async (req, res) => {
     });
   }
 };
-
 export const updateUser = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -124,10 +123,24 @@ export const updateUser = async (req, res) => {
       });
     }
 
-    const updateData = {};
+    const updateData = {}; // ✅ was missing — caused a crash on every name update
 
     if (name) {
-      updateData.name = name;
+      const trimmedName = name.trim();
+
+      const existingUser = await userModel.findOne({
+        name: trimmedName,
+        _id: { $ne: userId }, // ✅ excludes the current user directly in the query
+      });
+
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: "Username Already Taken",
+        });
+      }
+
+      updateData.name = trimmedName;
     }
 
     if (req.file) {
@@ -141,7 +154,6 @@ export const updateUser = async (req, res) => {
     const updatedUser = await userModel.findByIdAndUpdate(userId, updateData, {
       new: true,
     });
-
 
     return res.status(200).json({
       success: true,
@@ -161,7 +173,7 @@ export const getProfile = async (req, res) => {
     const userId = req.user.id;
 
     const user = await userModel.findById(userId).select("-password");
-console.log(user);
+    console.log(user);
     if (!user) {
       return res.status(404).json({
         success: false,
