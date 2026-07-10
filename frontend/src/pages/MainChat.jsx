@@ -63,6 +63,7 @@ const MainChat = () => {
   const [blockLoading, setBlockLoading] = useState(false);
   const [addMemberLoading, setAddMemberLoading] = useState(false);
   const [removeMemberLoading, setRemoveMemberLoading] = useState(null); // stores memberId being removed
+  const sendingLockRef = useRef(false); // ✅ synchronous guard against double-send (click/Enter races)
 
   const getMediaUrl = (value) => {
     if (!value) return null;
@@ -1312,14 +1313,25 @@ const MainChat = () => {
   };
 
   const handleSend = () => {
-    if (text.trim() === "" && !selectedFile) {
-      return;
-    }
+    if (text.trim() === "" && !selectedFile) return;
+    if (sendingLockRef.current) return; // ✅ blocks duplicate click/Enter races instantly (synchronous)
 
-    if (selectedConversation) {
-      sendPrivateMessage();
-    } else if (selectedRoom) {
-      sendMessage();
+    sendingLockRef.current = true;
+    const finish = () => {
+      sendingLockRef.current = false;
+    };
+
+    try {
+      if (selectedConversation) {
+        sendPrivateMessage().finally(finish);
+      } else if (selectedRoom) {
+        sendMessage().finally(finish);
+      } else {
+        finish();
+      }
+    } catch (err) {
+      console.error("handleSend error:", err);
+      finish();
     }
 
     // ✅ keep the mobile keyboard open after sending — without this, focus
@@ -1810,7 +1822,8 @@ const MainChat = () => {
 
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {messagesLoading ? (
-                  <div className="flex-1 flex items-center justify-center">
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                    <i className="fa-solid fa-spinner fa-spin text-3xl text-green-400"></i>
                     <p className="text-sm text-gray-500">Loading messages...</p>
                   </div>
                 ) : (
@@ -2171,7 +2184,8 @@ const MainChat = () => {
 
               <section className="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 overflow-y-auto space-y-4 bg-gradient-to-b from-gray-900 to-gray-950 flex flex-col">
                 {privateMessagesLoading ? (
-                  <div className="flex-1 flex items-center justify-center">
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                    <i className="fa-solid fa-spinner fa-spin text-3xl text-green-400"></i>
                     <p className="text-sm text-gray-500">Loading messages...</p>
                   </div>
                 ) : privateMessage.length === 0 ? (
