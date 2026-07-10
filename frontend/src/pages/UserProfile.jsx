@@ -232,7 +232,7 @@ const UserProfile = () => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Your name"
-                  className="text-white"
+                  className="w-full bg-gray-800/30 text-gray-500 rounded-xl px-4 py-3 outline-none border border-gray-800"
                 />
               </div>
 
