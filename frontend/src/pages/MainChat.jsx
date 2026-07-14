@@ -50,6 +50,9 @@ const MainChat = () => {
   const [privateChatActivity, setPrivateChatActivity] = useState({});
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const selectedRoomIdRef = useRef(null);
+  const selectedConversationIdRef = useRef(null);
+
   const [conversationUserMap, setConversationUserMap] = useState({});
 
   // ✅ NEW: loading states for every API call that previously had none
@@ -560,25 +563,30 @@ const MainChat = () => {
 
   useEffect(() => {
     const handleReceiveMessage = (newMessage) => {
-      setMessages((prev) => {
-        const exists = prev.some((m) => m._id === newMessage._id);
-        if (exists) return prev;
-        return [...prev, newMessage];
-      });
-
       const msgRoomId = newMessage.room?._id || newMessage.room;
       const isOpenRoom =
         selectedRoom && msgRoomId?.toString() === selectedRoom._id?.toString();
 
-      if (isOpenRoom && newMessage.sender?._id !== currentUserId) {
-        isSeen(selectedRoom._id);
+      const senderId = newMessage.sender?._id || newMessage.sender;
+      const isMyOwnMessage = senderId?.toString() === currentUserId?.toString();
+
+      if (isOpenRoom) {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m._id === newMessage._id);
+          if (exists) return prev;
+          return [...prev, newMessage];
+        });
+
+        if (!isMyOwnMessage) {
+          isSeen(selectedRoom._id);
+        }
       }
 
       if (msgRoomId) {
         updateRoomSidebar(
           msgRoomId,
           newMessage,
-          isOpenRoom || newMessage.sender?._id === currentUserId ? 0 : 1,
+          isOpenRoom || isMyOwnMessage ? 0 : 1,
         );
       }
     };
@@ -730,30 +738,34 @@ const MainChat = () => {
 
   useEffect(() => {
     const handleIncoming = (message) => {
-      setPrivateMessage((prev) => {
-        const exists = prev.some((m) => m._id === message._id);
-        if (exists) return prev;
-        return [...prev, message];
-      });
-
       const msgConvId = message.conversation?._id || message.conversation;
       const isOpenConversation =
         selectedConversation &&
         msgConvId?.toString() === selectedConversation._id?.toString();
 
-      if (isOpenConversation && message.sender?._id !== currentUserId) {
-        markPrivateSeen(selectedConversation._id);
+      const senderId = message.sender?._id || message.sender;
+      const isMyOwnMessage = senderId?.toString() === currentUserId?.toString();
+
+      if (isOpenConversation) {
+        setPrivateMessage((prev) => {
+          const exists = prev.some((m) => m._id === message._id);
+          if (exists) return prev;
+          return [...prev, message];
+        });
+
+        if (!isMyOwnMessage) {
+          markPrivateSeen(selectedConversation._id);
+        }
       }
 
       if (msgConvId) {
-        const matchedUser =
-          conversationUserMap[msgConvId]?.userId || message.sender?._id;
+        const matchedUser = conversationUserMap[msgConvId]?.userId || senderId;
         if (matchedUser) {
           updatePrivateSidebar(
             matchedUser,
             message,
             msgConvId,
-            isOpenConversation || message.sender?._id === currentUserId ? 0 : 1,
+            isOpenConversation || isMyOwnMessage ? 0 : 1,
           );
         }
       }
@@ -762,7 +774,7 @@ const MainChat = () => {
     socket.on("receivePrivateMessage", handleIncoming);
 
     return () => socket.off("receivePrivateMessage", handleIncoming);
-  }, [selectedConversation, currentUserId]);
+  }, [selectedConversation, currentUserId, conversationUserMap]);
 
   const createRoom = async () => {
     try {
@@ -996,22 +1008,33 @@ const MainChat = () => {
   };
 
   const getMessages = async () => {
+    const roomId = selectedRoom._id;
     try {
       setMessagesLoading(true);
       const token = localStorage.getItem("token");
 
       const response = await axios.get(
-        `${API_URL}/message/getMessages/${selectedRoom._id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        `${API_URL}/message/getMessages/${roomId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
-      setMessages(response.data);
+
+      // ✅ if the user switched to a different room while this request
+      // was in flight, throw the result away — it's stale
+      if (selectedRoomIdRef.current !== roomId) return;
+
+      // ✅ merge instead of overwrite: keep any message that was added
+      // locally (e.g. sent while this fetch was still loading) but isn't
+      // in the server response yet
+      setMessages((prev) => {
+        const fetched = response.data;
+        const fetchedIds = new Set(fetched.map((m) => m._id));
+        const pendingLocal = prev.filter((m) => !fetchedIds.has(m._id));
+        return [...fetched, ...pendingLocal];
+      });
+
       if (response.data?.length) {
         const lastMessage = response.data[response.data.length - 1];
-        updateRoomSidebar(selectedRoom._id, lastMessage, 0);
+        updateRoomSidebar(roomId, lastMessage, 0);
       }
     } catch (error) {
       console.log(error);
@@ -1187,19 +1210,23 @@ const MainChat = () => {
 
       const response = await axios.get(
         `${API_URL}/privateChat/getMessages/${conversationId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      // Support either { messages: [...] } or a raw array response
+      // ✅ discard stale response if conversation changed mid-flight
+      if (selectedConversationIdRef.current !== conversationId) return;
+
       const fetched = Array.isArray(response.data)
         ? response.data
         : response.data.messages || [];
 
-      setPrivateMessage(fetched);
+      // ✅ merge instead of overwrite
+      setPrivateMessage((prev) => {
+        const fetchedIds = new Set(fetched.map((m) => m._id));
+        const pendingLocal = prev.filter((m) => !fetchedIds.has(m._id));
+        return [...fetched, ...pendingLocal];
+      });
+
       if (fetched.length && selectedUser?._id) {
         const lastMessage = fetched[fetched.length - 1];
         updatePrivateSidebar(selectedUser._id, lastMessage, conversationId, 0);
@@ -1217,7 +1244,6 @@ const MainChat = () => {
       setPrivateMessagesLoading(false);
     }
   };
-
   useEffect(() => {
     if (selectedConversation) {
       getPrivateMessages(selectedConversation._id);
@@ -1733,8 +1759,6 @@ const MainChat = () => {
               </>
             )}
           </div>
-
-        
         </aside>
 
         {/* ===================== Main chat column ===================== */}
@@ -1831,10 +1855,14 @@ const MainChat = () => {
                     {messages.map((msg, index) => {
                       const isMe = msg.sender._id === currentUserId;
 
-                      const currentDate = new Date(msg.createdAt).toDateString();
+                      const currentDate = new Date(
+                        msg.createdAt,
+                      ).toDateString();
                       const prevDate =
                         index > 0
-                          ? new Date(messages[index - 1].createdAt).toDateString()
+                          ? new Date(
+                              messages[index - 1].createdAt,
+                            ).toDateString()
                           : null;
                       const showDateDivider = currentDate !== prevDate;
 
@@ -1866,7 +1894,9 @@ const MainChat = () => {
                           >
                             <p
                               className={`text-xs mb-1 ${
-                                isMe ? "text-green-400 text-right" : "text-blue-400"
+                                isMe
+                                  ? "text-green-400 text-right"
+                                  : "text-blue-400"
                               }`}
                             >
                               {msg.sender.name}

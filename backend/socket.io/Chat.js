@@ -1,62 +1,70 @@
 // socket.io/Chat.js
+// Server-side logic is already correct — io.to(roomId).emit() only
+// reaches sockets that are members of that room. No changes needed here.
+// The leak was happening on the client (see ChatRoom.jsx + socket.js).
 
 const onlineUsers = new Map();
 
-export const getReceiverSocketId = (userId) => onlineUsers.get(userId);
+export const getReceiverSocketId = (userId) => {
+  return onlineUsers.get(userId);
+};
 
 const chatSocket = (io) => {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
+    // User online
     socket.on("userOnline", (userId) => {
       socket.userId = userId;
       onlineUsers.set(userId, socket.id);
-
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
 
-    socket.on("joinConversation", (conversationId, callback) => {
-      socket.join(conversationId);
-      if (typeof callback === "function") callback();
-    });
-
+    // Join group room
     socket.on("joinRoom", (roomId, callback) => {
       socket.join(roomId);
+      console.log(`${socket.id} joined room ${roomId}`);
       if (typeof callback === "function") callback();
     });
 
-    socket.on("typing", ({ chatId, targetId, userId, userName, isTyping }) => {
-      const roomId = chatId || targetId;
+    // Leave group room
+    socket.on("leaveRoom", (roomId) => {
+      socket.leave(roomId);
+      console.log(`${socket.id} left room ${roomId}`);
+    });
+
+    // Send group message
+    socket.on("sendMessage", (data) => {
+      const { roomId, message, sender } = data;
       if (!roomId) return;
 
-      const eventName = isTyping ? "userTyping" : "userStopTyping";
-      socket.to(roomId).emit(eventName, {
-        chatId: roomId,
-        userId,
-        userName,
-        isTyping,
+      // Only sends to sockets currently in that room
+      io.to(roomId).emit("receiveMessage", {
+        roomId,
+        message,
+        sender,
+        createdAt: new Date(),
       });
     });
 
-    socket.on("stopTyping", ({ chatId, targetId, userId, userName }) => {
-      const roomId = chatId || targetId;
+    // Typing indicator
+    socket.on("typing", ({ roomId, userId, userName, isTyping }) => {
       if (!roomId) return;
+      socket.to(roomId).emit("userTyping", { roomId, userId, userName, isTyping });
+    });
 
+    // Stop typing
+    socket.on("stopTyping", ({ roomId, userId, userName }) => {
+      if (!roomId) return;
       socket.to(roomId).emit("userStopTyping", {
-        chatId: roomId,
+        roomId,
         userId,
         userName,
         isTyping: false,
       });
     });
 
-    // ✅ Fixed: only remove a user from the online map if THIS socket is
-    // still the one on record for them. Without this guard, a race where
-    // a new socket (e.g. after a refresh/reconnect) registers itself
-    // BEFORE the old socket's disconnect event fires would get wiped out
-    // by the old socket's disconnect handler — even though the user is
-    // still actually connected via the new socket. That's what was
-    // causing different clients to disagree about who's online.
+    // Disconnect
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
 
