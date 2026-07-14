@@ -52,6 +52,7 @@ const MainChat = () => {
   const menuRef = useRef(null);
   const selectedRoomIdRef = useRef(null);
   const selectedConversationIdRef = useRef(null);
+  const receivedPrivateMessageIdsRef = useRef(new Set());
 
   const [conversationUserMap, setConversationUserMap] = useState({});
 
@@ -95,6 +96,7 @@ const MainChat = () => {
   const filteredRooms = allRooms.filter((room) =>
     room.roomName.toLowerCase().includes(searchQuery.trim().toLowerCase()),
   );
+
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
     const aTime = privateChatActivity[a._id]?.lastMessageAt || 0;
@@ -150,6 +152,12 @@ const MainChat = () => {
   };
 
   const updateRoomSidebar = (roomId, message, unreadDelta = 0) => {
+    console.log("SIDEBAR UPDATE:", {
+    roomId,
+    unreadDelta,
+    message
+  });
+
     const key = roomId?.toString?.() || String(roomId || "");
     if (!key) return;
 
@@ -374,12 +382,6 @@ const MainChat = () => {
     });
   }, [messages, privateMessage]);
 
-  // ✅ Mobile viewport height fix — uses the visualViewport API (when
-  // available) instead of window.innerHeight. window.innerHeight does NOT
-  // shrink when the on-screen keyboard opens on most mobile browsers, which
-  // is why the footer/input used to end up hidden behind the keyboard.
-  // visualViewport.height DOES shrink, so the chat column resizes to fit
-  // exactly the visible area above the keyboard, keeping everything aligned.
   useEffect(() => {
     const vv = window.visualViewport;
 
@@ -444,10 +446,15 @@ const MainChat = () => {
 
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
-    if (storedToken) {
-      connectSocket(storedToken);
-    }
-  }, []);
+    if (!storedToken || !currentUserId) return;
+
+    const registerOnlineUser = () => socket.emit("userOnline", currentUserId.toString());
+    socket.on("connect", registerOnlineUser);
+    connectSocket(storedToken);
+    if (socket.connected) registerOnlineUser();
+
+    return () => socket.off("connect", registerOnlineUser);
+  }, [currentUserId]);
 
   const handleLogout = async () => {
     try {
@@ -470,19 +477,6 @@ const MainChat = () => {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    socket.on("connect", () => {
-      console.log("Connected:", socket.id);
-      if (currentUserId) {
-        socket.emit("userOnline", currentUserId);
-      }
-    });
-
-    return () => {
-      socket.off("connect");
-    };
-  }, [currentUserId]);
 
   // ✅ Online presence — list of currently online user ids
   useEffect(() => {
@@ -562,11 +556,21 @@ const MainChat = () => {
   }, [selectedRoom]);
 
   useEffect(() => {
-    const handleReceiveMessage = (newMessage) => {
-      const msgRoomId = newMessage.room?._id || newMessage.room;
-      const isOpenRoom =
-        selectedRoom && msgRoomId?.toString() === selectedRoom._id?.toString();
+    console.log("🔥 receiveMessage listener active");
 
+    const handleReceiveMessage = (newMessage) => {
+      console.log("🔥 PRIVATE MESSAGE RECEIVED:", newMessage);
+
+     const msgRoomId =
+  newMessage.room?._id ||
+  newMessage.room ||
+  newMessage.roomId;
+      const isOpenRoom =
+  msgRoomId?.toString() === selectedRoomIdRef.current?.toString();
+
+        console.log("Message room:", msgRoomId);
+console.log("Selected room:", selectedRoom?._id);
+console.log("Is open:", isOpenRoom);
       const senderId = newMessage.sender?._id || newMessage.sender;
       const isMyOwnMessage = senderId?.toString() === currentUserId?.toString();
 
@@ -597,7 +601,6 @@ const MainChat = () => {
       socket.off("receiveMessage", handleReceiveMessage);
     };
   }, [selectedRoom, currentUserId]);
-
   useEffect(() => {
     const handleMessagesSeen = ({ roomId, seenBy }) => {
       if (!selectedRoom || selectedRoom._id !== roomId) return;
@@ -730,15 +733,35 @@ const MainChat = () => {
     return () => socket.off("roomDeleted", handleRoomDeleted);
   }, []);
 
-  useEffect(() => {
-    if (!selectedConversation) return;
+useEffect(() => {
+  if (!selectedConversation) return;
 
-    socket.emit("joinConversation", selectedConversation._id);
-  }, [selectedConversation]);
+  socket.emit(
+    "joinConversation",
+    selectedConversation._id,
+    () => {
+      console.log(
+        "Joined conversation:",
+        selectedConversation._id
+      );
+    }
+  );
+
+}, [selectedConversation]);
 
   useEffect(() => {
     const handleIncoming = (message) => {
       const msgConvId = message.conversation?._id || message.conversation;
+      if (!msgConvId || !message?._id) return;
+
+      // The server can reach a user through both their conversation room and
+      // personal socket. Process that message ID only once.
+      if (receivedPrivateMessageIdsRef.current.has(message._id)) return;
+      receivedPrivateMessageIdsRef.current.add(message._id);
+      if (receivedPrivateMessageIdsRef.current.size > 500) {
+        receivedPrivateMessageIdsRef.current.clear();
+      }
+
       const isOpenConversation =
         selectedConversation &&
         msgConvId?.toString() === selectedConversation._id?.toString();
@@ -758,14 +781,21 @@ const MainChat = () => {
         }
       }
 
-      if (msgConvId) {
+      if (!isMyOwnMessage) {
         const matchedUser = conversationUserMap[msgConvId]?.userId || senderId;
         if (matchedUser) {
+          setConversationUserMap((prev) => ({
+            ...prev,
+            [msgConvId]: {
+              userId: matchedUser.toString(),
+              userName: message.sender?.name || prev[msgConvId]?.userName,
+            },
+          }));
           updatePrivateSidebar(
             matchedUser,
             message,
             msgConvId,
-            isOpenConversation || isMyOwnMessage ? 0 : 1,
+            isOpenConversation ? 0 : 1,
           );
         }
       }
@@ -1049,7 +1079,7 @@ const MainChat = () => {
     } else {
       setMessages([]);
     }
-  }, [selectedRoom]);
+  }, [selectedRoom?._id]);
 
   const waitForSocketConnection = () =>
     new Promise((resolve) => {
@@ -1129,25 +1159,30 @@ const MainChat = () => {
       });
     }
   };
+const handleSelectRoom = async (room) => {
 
-  const handleSelectRoom = async (room) => {
-    setSelectedRoom(room);
-    setMobileView("chat");
-    setSelectedConversation(null);
-    setSelectedUser(null);
-    setShowGroupInfo(false);
-    setShowChatInfo(false);
-    setRoomActivity((prev) => ({
-      ...prev,
-      [room._id]: {
-        ...(prev[room._id] || {}),
-        unreadCount: 0,
-      },
-    }));
+  setSelectedRoom(room);
 
-    await joinRoomWithAck(room._id);
-    await isSeen(room._id);
-  };
+   selectedRoomIdRef.current = room._id;
+   selectedConversationIdRef.current = null; // ✅ leaving any open private chat
+
+  setMobileView("chat");
+  setSelectedConversation(null);
+  setSelectedUser(null);
+  setShowGroupInfo(false);
+  setShowChatInfo(false);
+
+  setRoomActivity((prev) => ({
+    ...prev,
+    [room._id]: {
+      ...(prev[room._id] || {}),
+      unreadCount: 0,
+    },
+  }));
+
+  await joinRoomWithAck(room._id);
+  await isSeen(room._id);
+};
 
   const handleBackToList = () => {
     setMobileView("list");
@@ -1172,6 +1207,8 @@ const MainChat = () => {
       const conversation = response.data.conversation;
 
       setSelectedConversation(conversation);
+      selectedConversationIdRef.current = conversation._id;
+      selectedRoomIdRef.current = null; // ✅ leaving any open room
       setSelectedUser(user);
       setSelectedRoom(null);
       setMobileView("chat");
@@ -1324,6 +1361,7 @@ const MainChat = () => {
       chatId: targetId,
       userId: currentUserId,
       userName: currentUserName,
+      recipientId: selectedConversation ? selectedUser?._id : undefined,
       isTyping: true,
     });
 
@@ -1333,6 +1371,7 @@ const MainChat = () => {
         chatId: targetId,
         userId: currentUserId,
         userName: currentUserName,
+        recipientId: selectedConversation ? selectedUser?._id : undefined,
         isTyping: false,
       });
     }, 1500);

@@ -1,67 +1,99 @@
 // socket.io/Chat.js
-// Server-side logic is already correct — io.to(roomId).emit() only
-// reaches sockets that are members of that room. No changes needed here.
-// The leak was happening on the client (see ChatRoom.jsx + socket.js).
 
 const onlineUsers = new Map();
+
+let ioInstance = null;
+
+export const getIO = () => ioInstance;
 
 export const getReceiverSocketId = (userId) => {
   return onlineUsers.get(userId);
 };
 
 const chatSocket = (io) => {
+  ioInstance = io;
+
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
     // User online
     socket.on("userOnline", (userId) => {
       socket.userId = userId;
+
       onlineUsers.set(userId, socket.id);
+
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
 
     // Join group room
     socket.on("joinRoom", (roomId, callback) => {
       socket.join(roomId);
+
       console.log(`${socket.id} joined room ${roomId}`);
-      if (typeof callback === "function") callback();
+
+      if (typeof callback === "function") {
+        callback();
+      }
     });
 
     // Leave group room
     socket.on("leaveRoom", (roomId) => {
       socket.leave(roomId);
+
       console.log(`${socket.id} left room ${roomId}`);
     });
 
-    // Send group message
+    // client did.
+   socket.on("joinConversation", (conversationId, callback) => {
+
+  console.log(
+    "JOIN PRIVATE ROOM:",
+    conversationId
+  );
+
+  socket.join(conversationId.toString());
+  if (typeof callback === "function") callback();
+
+  console.log(
+    "CURRENT ROOMS:",
+    [...socket.rooms]
+  );
+
+});
+
+    // ✅ NEW — Leave private conversation room (mirrors leaveRoom)
+    socket.on("leaveConversation", (conversationId) => {
+      socket.leave(conversationId);
+
+      console.log(`${socket.id} left conversation ${conversationId}`);
+    });
+
+    // Optional: Direct socket message sending
+    // (If you use API, controller will emit instead)
     socket.on("sendMessage", (data) => {
-      const { roomId, message, sender } = data;
+      const { roomId, message } = data;
+
       if (!roomId) return;
 
-      // Only sends to sockets currently in that room
-      io.to(roomId).emit("receiveMessage", {
-        roomId,
-        message,
-        sender,
-        createdAt: new Date(),
-      });
+      io.to(roomId).emit("receiveMessage", message);
     });
 
-    // Typing indicator
-    socket.on("typing", ({ roomId, userId, userName, isTyping }) => {
-      if (!roomId) return;
-      socket.to(roomId).emit("userTyping", { roomId, userId, userName, isTyping });
-    });
+    socket.on("typing", ({ chatId, userId, userName, recipientId, isTyping }) => {
+      if (!chatId) return;
 
-    // Stop typing
-    socket.on("stopTyping", ({ roomId, userId, userName }) => {
-      if (!roomId) return;
-      socket.to(roomId).emit("userStopTyping", {
-        roomId,
+      const event = isTyping ? "userTyping" : "userStopTyping";
+      const payload = {
+        chatId,
         userId,
         userName,
-        isTyping: false,
-      });
+        isTyping,
+      };
+      // Users who already opened this conversation receive the event by room.
+      socket.to(chatId).emit(event, payload);
+
+      // The recipient must receive typing even before joining the conversation room.
+      const recipientSocketId = recipientId && getReceiverSocketId(recipientId.toString());
+      if (recipientSocketId) io.to(recipientSocketId).emit(event, payload);
     });
 
     // Disconnect
@@ -70,6 +102,7 @@ const chatSocket = (io) => {
 
       if (socket.userId && onlineUsers.get(socket.userId) === socket.id) {
         onlineUsers.delete(socket.userId);
+
         io.emit("onlineUsers", Array.from(onlineUsers.keys()));
       }
     });

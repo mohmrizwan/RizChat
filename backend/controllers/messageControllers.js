@@ -3,7 +3,6 @@ import path from "path";
 import messageModel from "../models/messageModel.js";
 import roomModel from "../models/roomModel.js";
 import { uploadToCloudinary } from "../utils/cloudinary.js";
-import { getReceiverSocketId } from "../socket.io/Chat.js"; // ✅ adjust path if your Chat.js lives elsewhere
 
 export const sendMessage = async (req, res) => {
   console.log("BODY:", req.body);
@@ -64,27 +63,7 @@ export const sendMessage = async (req, res) => {
       });
 
     const io = req.app.get("io");
-
-    // ✅ THE FIX: fetch the room's member list, then emit directly to each
-    // member's personal socket (if they're online) instead of relying on
-    // io.to(roomId).emit(...), which only reaches sockets that have already
-    // joined this room's socket.io room in the current session. This is
-    // why members who hadn't personally opened the room yet were getting
-    // no message and no unread badge update.
-    const room = await roomModel.findById(roomId).select("members");
-
-    if (room) {
-      room.members.forEach((memberId) => {
-        const memberIdStr = memberId.toString();
-        const memberSocketId = getReceiverSocketId(memberIdStr);
-        if (memberSocketId) {
-          io.to(memberSocketId).emit("receiveMessage", populatedMessage);
-        }
-      });
-    } else {
-      // fallback, just in case the room lookup somehow fails
-      io.to(roomId.toString()).emit("receiveMessage", populatedMessage);
-    }
+    io.to(roomId.toString()).emit("receiveMessage", populatedMessage);
 
     return res.status(200).json({ message: populatedMessage });
   } catch (error) {

@@ -3,6 +3,7 @@ import path from "path";
 import privateChatModel from "../models/privateChatModel.js";
 import conversationModel from "../models/conversationModel.js";
 import { uploadToCloudinary } from "../utils/cloudinary.js";
+import { getReceiverSocketId } from "../socket.io/Chat.js"; // ✅ adjust path if your Chat.js lives elsewhere
 
 export const sendPrivateMessage = async (req, res) => {
   try {
@@ -73,7 +74,10 @@ export const sendPrivateMessage = async (req, res) => {
 
     if (replyTo) {
       const existingReply = await privateChatModel.findById(replyTo);
-      if (!existingReply || existingReply.conversation.toString() !== conversationId.toString()) {
+      if (
+        !existingReply ||
+        existingReply.conversation.toString() !== conversationId.toString()
+      ) {
         return res.status(400).json({ message: "Invalid reply target" });
       }
     }
@@ -96,13 +100,27 @@ export const sendPrivateMessage = async (req, res) => {
     message = await privateChatModel
       .findById(message._id)
       .populate("sender", "name email")
-      .populate({ path: "replyTo", populate: { path: "sender", select: "name email" } });
+      .populate({
+        path: "replyTo",
+        populate: { path: "sender", select: "name email" },
+      });
 
     // Socket.IO
     const io = req.app.get("io");
 
     if (io) {
+      // Deliver to anyone currently viewing this conversation.
       io.to(conversationId.toString()).emit("receivePrivateMessage", message);
+
+      // Also deliver directly to each online participant. This lets a user
+      // receive a new message and unread-count update before opening the chat.
+      conversation.participants.forEach((participantId) => {
+        const participantSocketId = getReceiverSocketId(participantId.toString());
+
+        if (participantSocketId) {
+          io.to(participantSocketId).emit("receivePrivateMessage", message);
+        }
+      });
     }
 
     return res.status(201).json({
@@ -148,7 +166,10 @@ export const getPrivateMessages = async (req, res) => {
     const messages = await privateChatModel
       .find({ conversation: conversationId })
       .populate("sender", "name email")
-      .populate({ path: "replyTo", populate: { path: "sender", select: "name email" } })
+      .populate({
+        path: "replyTo",
+        populate: { path: "sender", select: "name email" },
+      })
       .sort({ createdAt: 1 }); // oldest first, so chat reads top-to-bottom
 
     return res.status(200).json({ messages });
@@ -157,7 +178,6 @@ export const getPrivateMessages = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
 
 export const deletePrivateMessage = async (req, res) => {
   try {
@@ -192,15 +212,26 @@ export const deletePrivateMessage = async (req, res) => {
 
     message.isDeleted = true;
     message.text = "This message was deleted";
-    message.media = null;       // ✅ clear so frontend stops trying to render it
+    message.media = null; // ✅ clear so frontend stops trying to render it
     message.mediaType = null;
     await message.save();
 
     const io = req.app.get("io");
 
-    io.to(message.conversation.toString()).emit("messageDeleted", {
-      messageId,
-    });
+    // ✅ Same fix applied here too — messageDeleted needs to reach both
+    // participants directly, not just whoever has this conversation's
+    // room joined right now.
+    const conversation = await conversationModel.findById(message.conversation);
+    if (io && conversation) {
+      conversation.participants.forEach((participantId) => {
+        const participantSocketId = getReceiverSocketId(
+          participantId.toString(),
+        );
+        if (participantSocketId) {
+          io.to(participantSocketId).emit("messageDeleted", { messageId });
+        }
+      });
+    }
 
     return res.status(200).json({
       message: "Message deleted successfully",
@@ -231,14 +262,22 @@ export const seenPrivateMessages = async (req, res) => {
     );
 
     const io = req.app.get("io");
-    if (io) {
-      io.to(conversationId.toString()).emit("privateMessagesSeen", {
-        conversationId,
-        seenBy: userId,
-      });
-      io.emit("privateMessagesSeen", {
-        conversationId,
-        seenBy: userId,
+
+    // ✅ Same fix — notify both participants directly so "seen" ticks
+    // update even if the other person hasn't got this conversation's
+    // room joined right now.
+    const conversation = await conversationModel.findById(conversationId);
+    if (io && conversation) {
+      conversation.participants.forEach((participantId) => {
+        const participantSocketId = getReceiverSocketId(
+          participantId.toString(),
+        );
+        if (participantSocketId) {
+          io.to(participantSocketId).emit("privateMessagesSeen", {
+            conversationId,
+            seenBy: userId,
+          });
+        }
       });
     }
 
