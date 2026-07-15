@@ -1916,7 +1916,7 @@ const handleSelectRoom = async (room) => {
           <div className="p-4 sm:p-6 border-b border-gray-800 shrink-0">
             <div className="flex justify-between relative" ref={menuRef}>
               <h2 className="text-xl font-bold text-green-400 tracking-wide flex items-center">
-              <img src={logo} alt="logo" className="w-8 h-8" />   RizChat
+              <img src={logo} alt="logo" className="w-10 h-10" />   RizChat
               </h2>
 
               <button
