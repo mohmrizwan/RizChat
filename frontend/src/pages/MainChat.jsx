@@ -38,12 +38,15 @@ const MainChat = () => {
   const [privateMessage, setPrivateMessage] = useState([]);
   const [privateMessagesLoading, setPrivateMessagesLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockedMe, setBlockedMe] = useState(false);
   const typingTimeoutRef = useRef(null);
+  const typingStartTimeoutRef = useRef(null);
+  const activeTypingRef = useRef(null);
   const [onlineUsers, setOnlineUsers] = useState([]); // array of userIds
   const [typingUser, setTypingUser] = useState(null); // userId currently typing in open chat
   const [roomActivity, setRoomActivity] = useState({});
@@ -90,12 +93,20 @@ const MainChat = () => {
   const currentUserData = allUsers.find((u) => u._id === currentUserId);
 
   const filteredUsers = otherUsers.filter((u) =>
-    u.name.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+    u.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase()),
   );
 
   const filteredRooms = allRooms.filter((room) =>
-    room.roomName.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+    room.roomName.toLowerCase().includes(debouncedSearchQuery.toLowerCase()),
   );
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
@@ -1357,25 +1368,51 @@ const handleSelectRoom = async (room) => {
 
     const currentUserName = currentUserData?.name || "Someone";
 
-    socket.emit("typing", {
+    const typingPayload = {
       chatId: targetId,
       userId: currentUserId,
       userName: currentUserName,
       recipientId: selectedConversation ? selectedUser?._id : undefined,
-      isTyping: true,
-    });
+    };
 
     clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
+    clearTimeout(typingStartTimeoutRef.current);
+
+    const stopTyping = () => {
       socket.emit("typing", {
-        chatId: targetId,
-        userId: currentUserId,
-        userName: currentUserName,
-        recipientId: selectedConversation ? selectedUser?._id : undefined,
+        ...typingPayload,
         isTyping: false,
       });
-    }, 1500);
+      activeTypingRef.current = null;
+    };
+
+    const scheduleStopTyping = () => {
+      typingTimeoutRef.current = setTimeout(stopTyping, 1500);
+    };
+
+    if (activeTypingRef.current?.chatId === targetId) {
+      scheduleStopTyping();
+      return;
+    }
+
+    typingStartTimeoutRef.current = setTimeout(() => {
+      socket.emit("typing", { ...typingPayload, isTyping: true });
+      activeTypingRef.current = typingPayload;
+      scheduleStopTyping();
+    }, 300);
   };
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(typingTimeoutRef.current);
+      clearTimeout(typingStartTimeoutRef.current);
+
+      if (activeTypingRef.current) {
+        socket.emit("typing", { ...activeTypingRef.current, isTyping: false });
+        activeTypingRef.current = null;
+      }
+    };
+  }, [selectedConversation?._id, selectedRoom?._id]);
 
   const handleSend = () => {
     if (text.trim() === "" && !selectedFile) return;
