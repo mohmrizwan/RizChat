@@ -62,6 +62,7 @@ const MainChat = () => {
   const receivedPrivateMessageIdsRef = useRef(new Set());
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const callPartnerRef = useRef(null);
   const callIdRef = useRef(null);
   const recorderRef = useRef(null);
@@ -1438,6 +1439,7 @@ const handleSelectRoom = async (room) => {
   }, [selectedConversation?._id, selectedRoom?._id]);
 
   const attachCallStream = (stream) => {
+    remoteStreamRef.current = stream;
     if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
@@ -1447,7 +1449,14 @@ const handleSelectRoom = async (room) => {
     if (localVideoRef.current && localStreamRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current;
     }
-  }, [videoCall]);
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current;
+    }
+    if (remoteAudioRef.current && remoteStreamRef.current) {
+      remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      void remoteAudioRef.current.play().catch(() => {});
+    }
+  }, [videoCall, voiceCall]);
 
   const endCall = (notify = true) => {
     const partnerId = callPartnerRef.current;
@@ -1458,6 +1467,7 @@ const handleSelectRoom = async (room) => {
     peerRef.current = null;
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
+    remoteStreamRef.current = null;
     callPartnerRef.current = null;
     callIdRef.current = null;
     setVoiceCall(false);
@@ -1468,10 +1478,18 @@ const handleSelectRoom = async (room) => {
   };
 
   const createPeer = ({ initiator, stream, partnerId, callType, callId }) => {
+    const turnUrl = import.meta.env.VITE_TURN_URL;
     const peer = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
+        ...(turnUrl
+          ? [{
+              urls: turnUrl,
+              username: import.meta.env.VITE_TURN_USERNAME,
+              credential: import.meta.env.VITE_TURN_CREDENTIAL,
+            }]
+          : []),
       ],
     });
     stream.getTracks().forEach((track) => peer.addTrack(track, stream));
@@ -1479,14 +1497,24 @@ const handleSelectRoom = async (room) => {
     callPartnerRef.current = partnerId;
     callIdRef.current = callId;
     const sendSignal = (signal) => {
-      socket.emit("webrtcSignal", { to: partnerId, signal, callType, callId });
+      socket.timeout(5000).emit(
+        "webrtcSignal",
+        { to: partnerId, signal, callType, callId },
+        (error, result) => {
+          if (!error && result?.delivered) return;
+          if (peerRef.current === peer) {
+            endCall(false);
+            Swal.fire("Call unavailable", result?.message || "The other user could not be reached.", "info");
+          }
+        },
+      );
     };
     peer.onicecandidate = ({ candidate }) => {
       if (candidate) sendSignal({ candidate: candidate.toJSON() });
     };
     peer.ontrack = ({ streams }) => streams[0] && attachCallStream(streams[0]);
     peer.onconnectionstatechange = () => {
-      if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+      if (["failed", "closed"].includes(peer.connectionState)) {
         if (peerRef.current === peer) endCall(false);
       }
     };
@@ -1610,7 +1638,8 @@ const handleSelectRoom = async (room) => {
         callType: incomingCall.callType,
         callId: incomingCall.callId,
       });
-      peer.signal(incomingCall.signal);
+      await peer.signal(incomingCall.signal);
+      await Promise.all((incomingCall.pendingCandidates || []).map((candidate) => peer.signal(candidate)));
       setVoiceCall(incomingCall.callType === "audio");
       setVideoCall(incomingCall.callType === "video");
       setIncomingCall(null);
@@ -1645,8 +1674,8 @@ const handleSelectRoom = async (room) => {
   useEffect(() => {
     const handleSignal = ({ from, signal, callType, callId }) => {
       if (peerRef.current && from === callPartnerRef.current) {
-        peerRef.current.signal(signal);
-      } else if (!peerRef.current) {
+        void peerRef.current.signal(signal);
+      } else if (!peerRef.current && signal?.type === "offer") {
         if (document.hidden && "Notification" in window && Notification.permission === "granted") {
           const caller = allUsersRef.current.find((user) => user._id === from)?.name || "A contact";
           const notification = new Notification(`Incoming ${callType} call`, {
@@ -1657,7 +1686,13 @@ const handleSelectRoom = async (room) => {
             notification.close();
           };
         }
-        setIncomingCall({ from, signal, callType, callId });
+        setIncomingCall({ from, signal, callType, callId, pendingCandidates: [] });
+      } else if (!peerRef.current && signal?.candidate) {
+        setIncomingCall((current) =>
+          current?.from === from && current.callId === callId
+            ? { ...current, pendingCandidates: [...current.pendingCandidates, signal] }
+            : current,
+        );
       }
     };
     const handleEnd = ({ from }) => {

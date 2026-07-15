@@ -98,15 +98,21 @@ const chatSocket = (io) => {
 
     // Socket.IO is only used to exchange WebRTC signalling data; call media
     // remains peer-to-peer between browsers.
-    socket.on("webrtcSignal", ({ to, signal, callType, callId }) => {
+    socket.on("webrtcSignal", ({ to, signal, callType, callId }, callback) => {
       const recipientSocketId = to && getReceiverSocketId(to.toString());
-      if (!recipientSocketId || !socket.userId) return;
+      if (!recipientSocketId || !socket.userId) {
+        if (typeof callback === "function") {
+          callback({ delivered: false, message: "That user is offline or unavailable." });
+        }
+        return;
+      }
       io.to(recipientSocketId).emit("webrtcSignal", {
         from: socket.userId,
         signal,
         callType,
         callId,
       });
+      if (typeof callback === "function") callback({ delivered: true });
     });
 
     socket.on("webrtcEnd", ({ to, callId }) => {
