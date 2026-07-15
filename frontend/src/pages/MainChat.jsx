@@ -6,6 +6,7 @@ import Swal from "sweetalert2";
 import Loader from "../components/Loader";
 import socket, { connectSocket, disconnectSocket } from "../Socket/socket";
 import { jwtDecode } from "jwt-decode";
+import logo from "../assets/images/Copilot_20260715_194139.png"
 
 const MainChat = () => {
   const navigate = useNavigate();
@@ -1915,7 +1916,7 @@ const handleSelectRoom = async (room) => {
           <div className="p-4 sm:p-6 border-b border-gray-800 shrink-0">
             <div className="flex justify-between relative" ref={menuRef}>
               <h2 className="text-xl font-bold text-green-400 tracking-wide flex items-center">
-                RizChat
+              <img src={logo} alt="logo" className="w-8 h-8" />   RizChat
               </h2>
 
               <button
