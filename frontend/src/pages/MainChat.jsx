@@ -15,6 +15,8 @@ const MainChat = () => {
   const textInputRef = useRef(null); // ✅ lets us keep focus on the input so mobile keyboard stays open after sending
   const [voiceCall, setVoiceCall] = useState(false);
   const [videoCall, setVideoCall] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [showChats, setShowChats] = useState(true);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showJoinRoom, setShowJoinRoom] = useState(false);
@@ -56,6 +58,15 @@ const MainChat = () => {
   const selectedRoomIdRef = useRef(null);
   const selectedConversationIdRef = useRef(null);
   const receivedPrivateMessageIdsRef = useRef(new Set());
+  const peerRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const callPartnerRef = useRef(null);
+  const callIdRef = useRef(null);
+  const recorderRef = useRef(null);
+  const incomingCallRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
   const [conversationUserMap, setConversationUserMap] = useState({});
 
@@ -101,6 +112,10 @@ const MainChat = () => {
   );
 
   useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
+
+  useEffect(() => {
     const timeoutId = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery.trim());
     }, 300);
@@ -129,6 +144,7 @@ const MainChat = () => {
     if (msg.text?.trim()) return msg.text.trim();
     if (msg.mediaType === "image") return "📷 Image";
     if (msg.mediaType === "video") return "🎥 Video";
+    if (msg.mediaType === "audio") return "🎤 Voice message";
     if (msg.mediaType === "file" || msg.mediaType === "pdf") return "📎 File";
     return "New message";
   };
@@ -1414,6 +1430,204 @@ const handleSelectRoom = async (room) => {
     };
   }, [selectedConversation?._id, selectedRoom?._id]);
 
+  const attachCallStream = (stream) => {
+    if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
+  };
+
+  const endCall = (notify = true) => {
+    const partnerId = callPartnerRef.current;
+    if (notify && partnerId) {
+      socket.emit("webrtcEnd", { to: partnerId, callId: callIdRef.current });
+    }
+    peerRef.current?.close();
+    peerRef.current = null;
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
+    callPartnerRef.current = null;
+    callIdRef.current = null;
+    setVoiceCall(false);
+    setVideoCall(false);
+    setIncomingCall(null);
+  };
+
+  const createPeer = ({ initiator, stream, partnerId, callType, callId }) => {
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+      ],
+    });
+    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+    peerRef.current = peer;
+    callPartnerRef.current = partnerId;
+    callIdRef.current = callId;
+    const sendSignal = (signal) => {
+      socket.emit("webrtcSignal", { to: partnerId, signal, callType, callId });
+    };
+    peer.onicecandidate = ({ candidate }) => {
+      if (candidate) sendSignal({ candidate: candidate.toJSON() });
+    };
+    peer.ontrack = ({ streams }) => streams[0] && attachCallStream(streams[0]);
+    peer.onconnectionstatechange = () => {
+      if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+        if (peerRef.current === peer) endCall(false);
+      }
+    };
+    peer._pendingCandidates = [];
+    peer.signal = async (signal) => {
+      try {
+        if (signal.candidate) {
+          if (!peer.remoteDescription) {
+            peer._pendingCandidates.push(signal.candidate);
+            return;
+          }
+          await peer.addIceCandidate(signal.candidate);
+          return;
+        }
+        await peer.setRemoteDescription(signal);
+        await Promise.all(
+          peer._pendingCandidates.splice(0).map((candidate) =>
+            peer.addIceCandidate(candidate),
+          ),
+        );
+        if (signal.type === "offer") {
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          sendSignal(peer.localDescription);
+        }
+      } catch (error) {
+        console.error("WebRTC signalling error:", error);
+        if (peerRef.current === peer) endCall(false);
+      }
+    };
+    if (initiator) {
+      void (async () => {
+        try {
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          sendSignal(peer.localDescription);
+        } catch (error) {
+          console.error("WebRTC offer error:", error);
+          if (peerRef.current === peer) endCall(false);
+        }
+      })();
+    }
+    return peer;
+  };
+
+  const getMediaErrorMessage = (error, callType) => {
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      return "Calls require HTTPS (or http://localhost). Open the app through localhost or deploy it over HTTPS.";
+    }
+    if (error?.name === "NotAllowedError") {
+      return `Browser access to the ${callType === "video" ? "camera or microphone" : "microphone"} was blocked. Enable it in the site permissions, then try again.`;
+    }
+    if (error?.name === "NotFoundError") {
+      return `No ${callType === "video" ? "camera or microphone" : "microphone"} was found. Connect or enable a device and try again.`;
+    }
+    if (error?.name === "NotReadableError") {
+      return "Your microphone or camera is being used by another application. Close that application and try again.";
+    }
+    return error?.message || "Unable to access the required media device.";
+  };
+
+  const requestCallMedia = (callType) => {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      return Promise.reject(new Error("Secure context required"));
+    }
+    return navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: callType === "video",
+    });
+  };
+
+  const startCall = async (callType) => {
+    if (!selectedUser?._id) return;
+    try {
+      const stream = await requestCallMedia(callType);
+      localStreamRef.current = stream;
+      const callId = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      createPeer({
+        initiator: true,
+        stream,
+        partnerId: selectedUser._id,
+        callType,
+        callId,
+      });
+      setVoiceCall(callType === "audio");
+      setVideoCall(callType === "video");
+    } catch (error) {
+      console.error("Unable to start call:", error);
+      Swal.fire("Unable to start call", getMediaErrorMessage(error, callType), "error");
+    }
+  };
+
+  const acceptIncomingCall = async () => {
+    if (!incomingCall) return;
+    try {
+      const stream = await requestCallMedia(incomingCall.callType);
+      localStreamRef.current = stream;
+      const peer = createPeer({
+        initiator: false,
+        stream,
+        partnerId: incomingCall.from,
+        callType: incomingCall.callType,
+        callId: incomingCall.callId,
+      });
+      peer.signal(incomingCall.signal);
+      setVoiceCall(incomingCall.callType === "audio");
+      setVideoCall(incomingCall.callType === "video");
+      setIncomingCall(null);
+    } catch (error) {
+      endCall(true);
+      console.error("Unable to answer call:", error);
+      Swal.fire("Unable to answer call", getMediaErrorMessage(error, incomingCall.callType), "error");
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const extension = mimeType.includes("ogg") ? "ogg" : "webm";
+        setSelectedFile(new File([new Blob(chunks, { type: mimeType })], `voice-message.${extension}`, { type: mimeType }));
+        stream.getTracks().forEach((track) => track.stop());
+        setIsRecording(false);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      Swal.fire("Microphone unavailable", "Allow browser microphone access to record a voice message.", "error");
+    }
+  };
+
+  useEffect(() => {
+    const handleSignal = ({ from, signal, callType, callId }) => {
+      if (peerRef.current && from === callPartnerRef.current) {
+        peerRef.current.signal(signal);
+      } else if (!peerRef.current) {
+        setIncomingCall({ from, signal, callType, callId });
+      }
+    };
+    const handleEnd = ({ from }) => {
+      if (from === callPartnerRef.current || from === incomingCallRef.current?.from) endCall(false);
+    };
+    socket.on("webrtcSignal", handleSignal);
+    socket.on("webrtcEnd", handleEnd);
+    return () => {
+      socket.off("webrtcSignal", handleSignal);
+      socket.off("webrtcEnd", handleEnd);
+      endCall(false);
+    };
+  }, []);
+
   const handleSend = () => {
     if (text.trim() === "" && !selectedFile) return;
     if (sendingLockRef.current) return; // ✅ blocks duplicate click/Enter races instantly (synchronous)
@@ -1892,7 +2106,7 @@ const handleSelectRoom = async (room) => {
 
                 <div className="flex items-center space-x-1 sm:space-x-2 lg:space-x-4 shrink-0">
                   <button
-                    onClick={() => setVoiceCall(true)}
+                    onClick={() => Swal.fire("Group calls", "Group calling is not available yet.", "info")}
                     className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
                     aria-label="Start audio call"
                   >
@@ -1901,7 +2115,7 @@ const handleSelectRoom = async (room) => {
                   </button>
 
                   <button
-                    onClick={() => setVideoCall(true)}
+                    onClick={() => Swal.fire("Group calls", "Group calling is not available yet.", "info")}
                     className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
                     aria-label="Start video call"
                   >
@@ -2011,6 +2225,12 @@ const handleSelectRoom = async (room) => {
                                       type="video/mp4"
                                     />
                                   </video>
+                                )}
+
+                                {msg.mediaType === "audio" && msg.media && (
+                                  <audio controls className="max-w-[250px] mb-2">
+                                    <source src={getMediaUrl(msg.media)} />
+                                  </audio>
                                 )}
 
                                 {msg.replyTo && (
@@ -2140,10 +2360,18 @@ const handleSelectRoom = async (room) => {
                 >
                   <i className="fa fa-paperclip text-xl"></i>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => isRecording ? recorderRef.current?.stop() : startVoiceRecording()}
+                  className={`transition shrink-0 ${isRecording ? "text-red-400 animate-pulse" : "text-gray-400 hover:text-green-400"}`}
+                  aria-label={isRecording ? "Stop recording" : "Record voice message"}
+                >
+                  <i className={`fa fa-${isRecording ? "stop" : "microphone"} text-xl`}></i>
+                </button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*,video/*,.pdf"
+                  accept="image/*,video/*,audio/*,.pdf"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -2260,7 +2488,7 @@ const handleSelectRoom = async (room) => {
 
                 <div className="flex items-center space-x-1 sm:space-x-2 lg:space-x-4 shrink-0">
                   <button
-                    onClick={() => setVoiceCall(true)}
+                    onClick={() => startCall("audio")}
                     className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
                     aria-label="Start audio call"
                   >
@@ -2269,7 +2497,7 @@ const handleSelectRoom = async (room) => {
                   </button>
 
                   <button
-                    onClick={() => setVideoCall(true)}
+                    onClick={() => startCall("video")}
                     className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
                     aria-label="Start video call"
                   >
@@ -2372,6 +2600,12 @@ const handleSelectRoom = async (room) => {
                                     type="video/mp4"
                                   />
                                 </video>
+                              )}
+
+                              {msg.mediaType === "audio" && msg.media && (
+                                <audio controls className="max-w-[250px] mb-2">
+                                  <source src={getMediaUrl(msg.media)} />
+                                </audio>
                               )}
 
                               {msg.replyTo && (
@@ -2510,10 +2744,18 @@ const handleSelectRoom = async (room) => {
                   >
                     <i className="fa fa-paperclip text-xl"></i>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => isRecording ? recorderRef.current?.stop() : startVoiceRecording()}
+                    className={`transition shrink-0 ${isRecording ? "text-red-400 animate-pulse" : "text-gray-400 hover:text-green-400"}`}
+                    aria-label={isRecording ? "Stop recording" : "Record voice message"}
+                  >
+                    <i className={`fa fa-${isRecording ? "stop" : "microphone"} text-xl`}></i>
+                  </button>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,video/*,.pdf"
+                    accept="image/*,video/*,audio/*,.pdf"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -2590,14 +2832,12 @@ const handleSelectRoom = async (room) => {
           {voiceCall && (
             <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center space-y-6 z-50 px-4">
               <h2 className="text-green-400 text-xl sm:text-2xl font-bold text-center">
-                Voice Call
+                Audio call with {selectedUser?.name || "contact"}
               </h2>
+              <audio ref={remoteAudioRef} autoPlay />
               <div className="flex space-x-6 text-2xl text-gray-300">
-                <i className="fa fa-microphone hover:text-green-400 cursor-pointer"></i>
-                <i className="fa fa-volume-up hover:text-green-400 cursor-pointer"></i>
-                <i className="fa fa-user-plus hover:text-green-400 cursor-pointer"></i>
                 <i
-                  onClick={() => setVoiceCall(false)}
+                  onClick={() => endCall()}
                   className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
                 ></i>
               </div>
@@ -2611,20 +2851,30 @@ const handleSelectRoom = async (room) => {
               </h2>
               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
                 <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[140px]">
-                  You
+                  <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
                 </div>
                 <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[140px]">
-                  Other user
+                  <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
                 </div>
               </div>
               <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
-                <i className="fa fa-microphone hover:text-green-400 cursor-pointer"></i>
-                <i className="fa fa-video hover:text-green-400 cursor-pointer"></i>
-                <i className="fa fa-user-plus hover:text-green-400 cursor-pointer"></i>
                 <i
-                  onClick={() => setVideoCall(false)}
+                  onClick={() => endCall()}
                   className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
                 ></i>
+              </div>
+            </div>
+          )}
+
+          {incomingCall && (
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-[60] px-4">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 text-center shadow-2xl">
+                <h2 className="text-xl font-bold text-green-400">Incoming {incomingCall.callType} call</h2>
+                <p className="text-gray-300 mt-2">{allUsers.find((user) => user._id === incomingCall.from)?.name || "A contact"} is calling.</p>
+                <div className="mt-6 flex justify-center gap-4">
+                  <button onClick={() => endCall(true)} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg">Decline</button>
+                  <button onClick={acceptIncomingCall} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg">Answer</button>
+                </div>
               </div>
             </div>
           )}

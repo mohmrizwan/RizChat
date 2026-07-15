@@ -67,6 +67,8 @@ export const sendPrivateMessage = async (req, res) => {
         mediaType = "video";
       } else if (file.mimetype === "application/pdf") {
         mediaType = "pdf";
+      } else if (file.mimetype.startsWith("audio")) {
+        mediaType = "audio";
       } else {
         mediaType = "file";
       }

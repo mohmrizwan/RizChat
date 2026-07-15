@@ -96,6 +96,26 @@ const chatSocket = (io) => {
       if (recipientSocketId) io.to(recipientSocketId).emit(event, payload);
     });
 
+    // Socket.IO is only used to exchange WebRTC signalling data; call media
+    // remains peer-to-peer between browsers.
+    socket.on("webrtcSignal", ({ to, signal, callType, callId }) => {
+      const recipientSocketId = to && getReceiverSocketId(to.toString());
+      if (!recipientSocketId || !socket.userId) return;
+      io.to(recipientSocketId).emit("webrtcSignal", {
+        from: socket.userId,
+        signal,
+        callType,
+        callId,
+      });
+    });
+
+    socket.on("webrtcEnd", ({ to, callId }) => {
+      const recipientSocketId = to && getReceiverSocketId(to.toString());
+      if (recipientSocketId && socket.userId) {
+        io.to(recipientSocketId).emit("webrtcEnd", { from: socket.userId, callId });
+      }
+    });
+
     // Disconnect
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);

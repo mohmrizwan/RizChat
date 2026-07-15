@@ -28,6 +28,8 @@ export const sendMessage = async (req, res) => {
         ? "image"
         : req.file.mimetype.startsWith("video/")
           ? "video"
+          : req.file.mimetype.startsWith("audio/")
+            ? "audio"
           : "file";
     }
 
