@@ -116,11 +116,39 @@ const chatSocket = (io) => {
       }
     });
 
+    // Small-group WebRTC mesh signalling. Each participant makes one direct
+    // peer connection to every other participant in the active room call.
+    socket.on("joinGroupCall", (roomId, callback) => {
+      if (!roomId || !socket.userId) return;
+      const callRoom = `group-call:${roomId}`;
+      const participants = [...(io.sockets.adapter.rooms.get(callRoom) || [])]
+        .map((socketId) => io.sockets.sockets.get(socketId)?.userId)
+        .filter(Boolean);
+      socket.join(callRoom);
+      socket.to(callRoom).emit("groupCallParticipantJoined", { roomId, userId: socket.userId });
+      if (typeof callback === "function") callback(participants);
+    });
+
+    socket.on("leaveGroupCall", (roomId) => {
+      if (!roomId || !socket.userId) return;
+      const callRoom = `group-call:${roomId}`;
+      socket.leave(callRoom);
+      socket.to(callRoom).emit("groupCallParticipantLeft", { roomId, userId: socket.userId });
+    });
+
     // Disconnect
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
 
       if (socket.userId && onlineUsers.get(socket.userId) === socket.id) {
+        for (const room of socket.rooms) {
+          if (room.startsWith("group-call:")) {
+            socket.to(room).emit("groupCallParticipantLeft", {
+              roomId: room.replace("group-call:", ""),
+              userId: socket.userId,
+            });
+          }
+        }
         onlineUsers.delete(socket.userId);
 
         io.emit("onlineUsers", Array.from(onlineUsers.keys()));

@@ -17,6 +17,8 @@ const MainChat = () => {
   const [videoCall, setVideoCall] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
   const [showChats, setShowChats] = useState(true);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showJoinRoom, setShowJoinRoom] = useState(false);
@@ -64,6 +66,7 @@ const MainChat = () => {
   const callIdRef = useRef(null);
   const recorderRef = useRef(null);
   const incomingCallRef = useRef(null);
+  const allUsersRef = useRef([]);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -114,6 +117,10 @@ const MainChat = () => {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    allUsersRef.current = allUsers;
+  }, [allUsers]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -1436,6 +1443,12 @@ const handleSelectRoom = async (room) => {
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
   };
 
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, [videoCall]);
+
   const endCall = (notify = true) => {
     const partnerId = callPartnerRef.current;
     if (notify && partnerId) {
@@ -1449,6 +1462,8 @@ const handleSelectRoom = async (room) => {
     callIdRef.current = null;
     setVoiceCall(false);
     setVideoCall(false);
+    setIsMuted(false);
+    setIsCameraOff(false);
     setIncomingCall(null);
   };
 
@@ -1543,8 +1558,27 @@ const handleSelectRoom = async (room) => {
     });
   };
 
+  const toggleMute = () => {
+    const nextMuted = !isMuted;
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setIsMuted(nextMuted);
+  };
+
+  const toggleCamera = () => {
+    const nextCameraOff = !isCameraOff;
+    localStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !nextCameraOff;
+    });
+    setIsCameraOff(nextCameraOff);
+  };
+
   const startCall = async (callType) => {
     if (!selectedUser?._id) return;
+    if ("Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
     try {
       const stream = await requestCallMedia(callType);
       localStreamRef.current = stream;
@@ -1613,6 +1647,16 @@ const handleSelectRoom = async (room) => {
       if (peerRef.current && from === callPartnerRef.current) {
         peerRef.current.signal(signal);
       } else if (!peerRef.current) {
+        if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+          const caller = allUsersRef.current.find((user) => user._id === from)?.name || "A contact";
+          const notification = new Notification(`Incoming ${callType} call`, {
+            body: `${caller} is calling you on RizChat.`,
+          });
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+        }
         setIncomingCall({ from, signal, callType, callId });
       }
     };
@@ -2836,6 +2880,9 @@ const handleSelectRoom = async (room) => {
               </h2>
               <audio ref={remoteAudioRef} autoPlay />
               <div className="flex space-x-6 text-2xl text-gray-300">
+                <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+                  <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+                </button>
                 <i
                   onClick={() => endCall()}
                   className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
@@ -2858,6 +2905,12 @@ const handleSelectRoom = async (room) => {
                 </div>
               </div>
               <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
+                <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+                  <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+                </button>
+                <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
+                  <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
+                </button>
                 <i
                   onClick={() => endCall()}
                   className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
