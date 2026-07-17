@@ -3592,32 +3592,40 @@ const handleSelectRoom = async (room) => {
         )}
 
         {videoCall && (
-          <div className="fixed inset-0 bg-black/90 flex flex-col z-[55]">
-            <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4 px-4">
-              Video Call
-            </h2>
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
-              <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
-              </div>
-              <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
-                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
-              </div>
-            </div>
-            <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
-              <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
-                <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
-              </button>
-              <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
-                <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
-              </button>
-              <i
-                onClick={() => endCall()}
-                className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
-              ></i>
-            </div>
-          </div>
-        )}
+  <div className="fixed inset-0 bg-black/90 flex flex-col z-[55]">
+    <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4 px-4">
+      Video Call
+    </h2>
+    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
+      <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
+        <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
+      </div>
+      <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
+        <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
+      </div>
+    </div>
+    <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
+      <button
+        onClick={toggleMute}
+        aria-label={isMuted ? "Unmute" : "Mute"}
+        className={isMuted ? "text-red-400" : "hover:text-green-400"}
+      >
+        <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+      </button>
+      <button
+        onClick={toggleCamera}
+        aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"}
+        className={isCameraOff ? "text-red-400" : "hover:text-green-400"}
+      >
+        <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
+      </button>
+      <i
+        onClick={() => endCall()}
+        className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
+      ></i>
+    </div>
+  </div>
+)}
 
         {incomingCall && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65] px-4">
@@ -3765,6 +3773,7 @@ const handleSelectRoom = async (room) => {
 // ✅ Small helper component for each remote participant tile in a group call.
 // Kept outside MainChat so each tile manages its own <video>/<audio> ref
 // without re-touching every other tile's DOM node on every render.
+// Small helper component for each remote participant tile in a group call.
 const GroupCallTile = ({ participant, isVideo }) => {
   const mediaRef = useRef(null);
 
@@ -3777,7 +3786,12 @@ const GroupCallTile = ({ participant, isVideo }) => {
   return (
     <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-300 min-h-[120px] relative">
       {isVideo ? (
-        <video ref={mediaRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
+        <video
+          ref={mediaRef}
+          autoPlay
+          playsInline
+          className="w-full h-full object-cover rounded-xl"
+        />
       ) : (
         <>
           <audio ref={mediaRef} autoPlay />
@@ -3790,5 +3804,4 @@ const GroupCallTile = ({ participant, isVideo }) => {
     </div>
   );
 };
-
 export default MainChat;
