@@ -1592,12 +1592,18 @@ const handleSelectRoom = async (room) => {
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !nextMuted;
     });
+    groupLocalStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
     setIsMuted(nextMuted);
   };
 
   const toggleCamera = () => {
     const nextCameraOff = !isCameraOff;
     localStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !nextCameraOff;
+    });
+    groupLocalStreamRef.current?.getVideoTracks().forEach((track) => {
       track.enabled = !nextCameraOff;
     });
     setIsCameraOff(nextCameraOff);
@@ -1627,6 +1633,44 @@ const handleSelectRoom = async (room) => {
     }
   };
 
+  // ✅ NEW: bring the caller's private chat into view so there's context
+  // during/after a call, instead of leaving the caller on whatever screen
+  // (or list view) they happened to be on when the call came in.
+  const openChatWithUser = async (userId) => {
+    try {
+      const user = allUsersRef.current.find((u) => u._id === userId);
+      if (!user) return;
+      const token = localStorage.getItem("token");
+
+      const response = await axios.post(
+        `${API_URL}/privateChat/start`,
+        { recieverId: userId },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      const conversation = response.data.conversation;
+
+      setSelectedConversation(conversation);
+      selectedConversationIdRef.current = conversation._id;
+      selectedRoomIdRef.current = null;
+      setSelectedUser(user);
+      setSelectedRoom(null);
+      setMobileView("chat");
+      setShowGroupInfo(false);
+      setShowChatInfo(false);
+      setConversationUserMap((prev) => ({
+        ...prev,
+        [conversation._id]: { userId: user._id, userName: user.name },
+      }));
+
+      await joinConversationWithAck(conversation._id);
+      await markPrivateSeen(conversation._id);
+      await getPrivateMessages(conversation._id);
+    } catch (error) {
+      console.error("Unable to open caller's chat:", error);
+    }
+  };
+
   const acceptIncomingCall = async () => {
     if (!incomingCall) return;
     try {
@@ -1643,7 +1687,11 @@ const handleSelectRoom = async (room) => {
       await Promise.all((incomingCall.pendingCandidates || []).map((candidate) => peer.signal(candidate)));
       setVoiceCall(incomingCall.callType === "audio");
       setVideoCall(incomingCall.callType === "video");
+      const callerId = incomingCall.from;
       setIncomingCall(null);
+
+      // ✅ take the user straight into the caller's chat
+      void openChatWithUser(callerId);
     } catch (error) {
       endCall(true);
       console.error("Unable to answer call:", error);
@@ -1672,8 +1720,267 @@ const handleSelectRoom = async (room) => {
     }
   };
 
+  // =====================================================================
+  // ✅ GROUP CALLING (audio/video) for rooms
+  //
+  // This reuses the exact same per-user "webrtcSignal" / "webrtcEnd"
+  // socket events your 1:1 calls already use (each event just carries an
+  // extra `isGroupCall: true` + `roomId` field). It builds a full mesh:
+  // each participant opens a direct RTCPeerConnection to every other
+  // participant in the room. To avoid both sides sending an offer at the
+  // same time (glare), the participant with the lexicographically lower
+  // user id is always the one who initiates that particular connection.
+  //
+  // IMPORTANT: this assumes your Socket.IO server relays the *entire*
+  // payload object it receives for "webrtcSignal"/"webrtcEnd" to the
+  // target user's socket (not just a hand-picked subset of fields). If
+  // your server explicitly destructures only {to, signal, callType,
+  // callId}, add `isGroupCall` and `roomId` to what it forwards too.
+  // =====================================================================
+  const [groupCallType, setGroupCallType] = useState(null); // "audio" | "video" | null
+  const [groupParticipants, setGroupParticipants] = useState({}); // { [userId]: { name, stream } }
+  const [incomingGroupCall, setIncomingGroupCall] = useState(null);
+  const groupPeersRef = useRef({});
+  const groupLocalStreamRef = useRef(null);
+  const groupCallIdRef = useRef(null);
+  const groupCallRoomIdRef = useRef(null);
+  const incomingGroupCallRef = useRef(null);
+
   useEffect(() => {
-    const handleSignal = ({ from, signal, callType, callId }) => {
+    incomingGroupCallRef.current = incomingGroupCall;
+  }, [incomingGroupCall]);
+
+  const removeGroupPeer = (peerId) => {
+    const peer = groupPeersRef.current[peerId];
+    if (peer) {
+      peer.close();
+      delete groupPeersRef.current[peerId];
+    }
+    setGroupParticipants((prev) => {
+      if (!(peerId in prev)) return prev;
+      const next = { ...prev };
+      delete next[peerId];
+      return next;
+    });
+  };
+
+  const connectToGroupMember = (peerId, stream, callType, callId, name) => {
+    if (!peerId || peerId === currentUserId) return null;
+    if (groupPeersRef.current[peerId]) return groupPeersRef.current[peerId];
+
+    const initiator = currentUserId?.toString() < peerId?.toString();
+    const turnUrl = import.meta.env.VITE_TURN_URL;
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        ...(turnUrl
+          ? [{
+              urls: turnUrl,
+              username: import.meta.env.VITE_TURN_USERNAME,
+              credential: import.meta.env.VITE_TURN_CREDENTIAL,
+            }]
+          : []),
+      ],
+    });
+    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+    groupPeersRef.current[peerId] = peer;
+
+    const sendSignal = (signal) => {
+      socket.emit("webrtcSignal", {
+        to: peerId,
+        signal,
+        callType,
+        callId,
+        isGroupCall: true,
+        roomId: groupCallRoomIdRef.current,
+      });
+    };
+
+    peer.onicecandidate = ({ candidate }) => {
+      if (candidate) sendSignal({ candidate: candidate.toJSON() });
+    };
+    peer.ontrack = ({ streams }) => {
+      if (!streams[0]) return;
+      setGroupParticipants((prev) => ({
+        ...prev,
+        [peerId]: { name: prev[peerId]?.name || name || "Member", stream: streams[0] },
+      }));
+    };
+    peer.onconnectionstatechange = () => {
+      if (["failed", "closed", "disconnected"].includes(peer.connectionState)) {
+        if (groupPeersRef.current[peerId] === peer) removeGroupPeer(peerId);
+      }
+    };
+
+    peer._pendingCandidates = [];
+    peer.signal = async (signal) => {
+      try {
+        if (signal.candidate) {
+          if (!peer.remoteDescription) {
+            peer._pendingCandidates.push(signal.candidate);
+            return;
+          }
+          await peer.addIceCandidate(signal.candidate);
+          return;
+        }
+        await peer.setRemoteDescription(signal);
+        await Promise.all(
+          peer._pendingCandidates.splice(0).map((candidate) => peer.addIceCandidate(candidate)),
+        );
+        if (signal.type === "offer") {
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          sendSignal(peer.localDescription);
+        }
+      } catch (error) {
+        console.error("Group WebRTC signalling error:", error);
+        removeGroupPeer(peerId);
+      }
+    };
+
+    setGroupParticipants((prev) => ({
+      ...prev,
+      [peerId]: prev[peerId] || { name: name || "Member", stream: null },
+    }));
+
+    if (initiator) {
+      void (async () => {
+        try {
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          sendSignal(peer.localDescription);
+        } catch (error) {
+          console.error("Group WebRTC offer error:", error);
+          removeGroupPeer(peerId);
+        }
+      })();
+    }
+
+    return peer;
+  };
+
+  const endGroupCall = () => {
+    Object.keys(groupPeersRef.current).forEach((peerId) => {
+      socket.emit("webrtcEnd", {
+        to: peerId,
+        callId: groupCallIdRef.current,
+        isGroupCall: true,
+        roomId: groupCallRoomIdRef.current,
+      });
+      groupPeersRef.current[peerId]?.close();
+    });
+    groupPeersRef.current = {};
+    groupLocalStreamRef.current?.getTracks().forEach((track) => track.stop());
+    groupLocalStreamRef.current = null;
+    groupCallIdRef.current = null;
+    groupCallRoomIdRef.current = null;
+    setGroupCallType(null);
+    setGroupParticipants({});
+    setIsMuted(false);
+    setIsCameraOff(false);
+  };
+
+  const startGroupCall = async (callType) => {
+    if (!selectedRoom) return;
+    if (groupCallType) return; // already in a call
+    try {
+      const stream = await requestCallMedia(callType);
+      groupLocalStreamRef.current = stream;
+      const callId = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      groupCallIdRef.current = callId;
+      groupCallRoomIdRef.current = selectedRoom._id;
+      setGroupParticipants({});
+      setGroupCallType(callType);
+
+      selectedRoom.members
+        .filter((member) => member._id !== currentUserId)
+        .forEach((member) =>
+          connectToGroupMember(member._id, stream, callType, callId, member.name),
+        );
+    } catch (error) {
+      console.error("Unable to start group call:", error);
+      groupLocalStreamRef.current = null;
+      setGroupCallType(null);
+      Swal.fire("Unable to start group call", getMediaErrorMessage(error, callType), "error");
+    }
+  };
+
+  const acceptGroupCall = async () => {
+    if (!incomingGroupCall) return;
+    const { from, roomId, callType, callId, signal } = incomingGroupCall;
+    try {
+      const stream = await requestCallMedia(callType);
+      groupLocalStreamRef.current = stream;
+      groupCallIdRef.current = callId;
+      groupCallRoomIdRef.current = roomId;
+      setGroupParticipants({});
+      setGroupCallType(callType);
+      setIncomingGroupCall(null);
+
+      const callerName = allUsersRef.current.find((u) => u._id === from)?.name;
+      const peer = connectToGroupMember(from, stream, callType, callId, callerName);
+      if (peer) await peer.signal(signal);
+
+      // ✅ Join the room's chat view so there's context, and best-effort
+      // connect to any other members of the room too (full mesh)
+      const room = allRooms.find((r) => r._id === roomId);
+      if (room) {
+        setSelectedRoom(room);
+        selectedRoomIdRef.current = room._id;
+        selectedConversationIdRef.current = null;
+        setSelectedConversation(null);
+        setSelectedUser(null);
+        setMobileView("chat");
+        setShowGroupInfo(false);
+        setShowChatInfo(false);
+        room.members
+          .filter((member) => member._id !== currentUserId && member._id !== from)
+          .forEach((member) =>
+            connectToGroupMember(member._id, stream, callType, callId, member.name),
+          );
+      }
+    } catch (error) {
+      console.error("Unable to join group call:", error);
+      groupLocalStreamRef.current = null;
+      setGroupCallType(null);
+      setIncomingGroupCall(null);
+      Swal.fire("Unable to join group call", getMediaErrorMessage(error, callType), "error");
+    }
+  };
+
+  const declineGroupCall = () => {
+    if (!incomingGroupCall) return;
+    socket.emit("webrtcEnd", {
+      to: incomingGroupCall.from,
+      callId: incomingGroupCall.callId,
+      isGroupCall: true,
+      roomId: incomingGroupCall.roomId,
+    });
+    setIncomingGroupCall(null);
+  };
+
+  useEffect(() => {
+    const handleSignal = ({ from, signal, callType, callId, isGroupCall, roomId }) => {
+      if (isGroupCall) {
+        if (groupPeersRef.current[from]) {
+          void groupPeersRef.current[from].signal(signal);
+          return;
+        }
+        if (signal?.type !== "offer") return; // stray candidate with no peer yet
+
+        if (groupCallRoomIdRef.current === roomId) {
+          // Already in this room's call — connect straight back (mesh join)
+          const name = allUsersRef.current.find((u) => u._id === from)?.name;
+          const peer = connectToGroupMember(from, groupLocalStreamRef.current, callType, callId, name);
+          if (peer) void peer.signal(signal);
+          return;
+        }
+
+        setIncomingGroupCall({ from, roomId, callType, callId, signal });
+        return;
+      }
+
       if (peerRef.current && from === callPartnerRef.current) {
         void peerRef.current.signal(signal);
       } else if (!peerRef.current && signal?.type === "offer") {
@@ -1696,7 +2003,12 @@ const handleSelectRoom = async (room) => {
         );
       }
     };
-    const handleEnd = ({ from }) => {
+    const handleEnd = ({ from, isGroupCall }) => {
+      if (isGroupCall) {
+        removeGroupPeer(from);
+        if (incomingGroupCallRef.current?.from === from) setIncomingGroupCall(null);
+        return;
+      }
       if (from === callPartnerRef.current || from === incomingCallRef.current?.from) endCall(false);
     };
     socket.on("webrtcSignal", handleSignal);
@@ -1705,6 +2017,7 @@ const handleSelectRoom = async (room) => {
       socket.off("webrtcSignal", handleSignal);
       socket.off("webrtcEnd", handleEnd);
       endCall(false);
+      endGroupCall();
     };
   }, []);
 
@@ -2186,18 +2499,20 @@ const handleSelectRoom = async (room) => {
 
                 <div className="flex items-center space-x-1 sm:space-x-2 lg:space-x-4 shrink-0">
                   <button
-                    onClick={() => Swal.fire("Group calls", "Group calling is not available yet.", "info")}
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
-                    aria-label="Start audio call"
+                    onClick={() => startGroupCall("audio")}
+                    disabled={!!groupCallType}
+                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition disabled:opacity-50"
+                    aria-label="Start group audio call"
                   >
                     <i className="fa fa-phone text-green-400"></i>
                     <span className="text-sm hidden lg:inline">Audio</span>
                   </button>
 
                   <button
-                    onClick={() => Swal.fire("Group calls", "Group calling is not available yet.", "info")}
-                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition"
-                    aria-label="Start video call"
+                    onClick={() => startGroupCall("video")}
+                    disabled={!!groupCallType}
+                    className="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-2 sm:px-3 py-2 rounded-lg shadow-md transition disabled:opacity-50"
+                    aria-label="Start group video call"
                   >
                     <i className="fa fa-video-camera text-green-400"></i>
                     <span className="text-sm hidden lg:inline">Video</span>
@@ -2908,65 +3223,6 @@ const handleSelectRoom = async (room) => {
               <p>Select a room to start chatting</p>
             </div>
           )}
-
-          {voiceCall && (
-            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center space-y-6 z-50 px-4">
-              <h2 className="text-green-400 text-xl sm:text-2xl font-bold text-center">
-                Audio call with {selectedUser?.name || "contact"}
-              </h2>
-              <audio ref={remoteAudioRef} autoPlay />
-              <div className="flex space-x-6 text-2xl text-gray-300">
-                <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
-                  <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
-                </button>
-                <i
-                  onClick={() => endCall()}
-                  className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
-                ></i>
-              </div>
-            </div>
-          )}
-
-          {videoCall && (
-            <div className="absolute inset-0 bg-black/90 flex flex-col z-50">
-              <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4 px-4">
-                Video Call
-              </h2>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
-                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
-                  <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
-                </div>
-                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
-                  <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
-                </div>
-              </div>
-              <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
-                <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
-                  <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
-                </button>
-                <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
-                  <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
-                </button>
-                <i
-                  onClick={() => endCall()}
-                  className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
-                ></i>
-              </div>
-            </div>
-          )}
-
-          {incomingCall && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-[60] px-4">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 text-center shadow-2xl">
-                <h2 className="text-xl font-bold text-green-400">Incoming {incomingCall.callType} call</h2>
-                <p className="text-gray-300 mt-2">{allUsers.find((user) => user._id === incomingCall.from)?.name || "A contact"} is calling.</p>
-                <div className="mt-6 flex justify-center gap-4">
-                  <button onClick={() => endCall(true)} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg">Decline</button>
-                  <button onClick={acceptIncomingCall} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg">Answer</button>
-                </div>
-              </div>
-            </div>
-          )}
         </main>
 
         {/* ===================== Image preview lightbox ===================== */}
@@ -3309,6 +3565,123 @@ const handleSelectRoom = async (room) => {
             </div>
           </div>
         )}
+
+        {/* ===================== Call overlays — rendered at the TOP LEVEL =====================
+             ✅ FIX: these used to live inside <main>, which is `hidden` on
+             mobile whenever mobileView !== "chat" (e.g. while browsing the
+             chat list). That made the entire call UI — including the hangup
+             button — invisible if a call came in outside the chat screen.
+             Now they're siblings of <aside>/<main>, `fixed` to the viewport,
+             so they always render regardless of which screen you're on. */}
+        {voiceCall && (
+          <div className="fixed inset-0 bg-black/80 flex flex-col items-center justify-center space-y-6 z-[55] px-4">
+            <h2 className="text-green-400 text-xl sm:text-2xl font-bold text-center">
+              Audio call with {selectedUser?.name || "contact"}
+            </h2>
+            <audio ref={remoteAudioRef} autoPlay />
+            <div className="flex space-x-6 text-2xl text-gray-300">
+              <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+                <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+              </button>
+              <i
+                onClick={() => endCall()}
+                className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
+              ></i>
+            </div>
+          </div>
+        )}
+
+        {videoCall && (
+          <div className="fixed inset-0 bg-black/90 flex flex-col z-[55]">
+            <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4 px-4">
+              Video Call
+            </h2>
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
+              <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
+                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
+              </div>
+              <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
+                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
+              </div>
+            </div>
+            <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
+              <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+                <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+              </button>
+              <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
+                <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
+              </button>
+              <i
+                onClick={() => endCall()}
+                className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
+              ></i>
+            </div>
+          </div>
+        )}
+
+        {incomingCall && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65] px-4">
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 text-center shadow-2xl">
+              <h2 className="text-xl font-bold text-green-400">Incoming {incomingCall.callType} call</h2>
+              <p className="text-gray-300 mt-2">{allUsers.find((user) => user._id === incomingCall.from)?.name || "A contact"} is calling.</p>
+              <div className="mt-6 flex justify-center gap-4">
+                <button onClick={() => endCall(true)} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg">Decline</button>
+                <button onClick={acceptIncomingCall} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg">Answer</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===================== Group call overlay ===================== */}
+        {groupCallType && (
+          <div className="fixed inset-0 bg-black/90 flex flex-col z-[55] px-2 sm:px-4">
+            <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4">
+              {selectedRoom?.roomName || "Group"} call
+            </h2>
+            <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 sm:p-6 overflow-y-auto content-start">
+              <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-300 min-h-[120px] relative">
+                {groupCallType === "video" ? (
+                  <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
+                ) : (
+                  <i className="fa fa-microphone text-3xl"></i>
+                )}
+                <span className="absolute bottom-1 left-1 text-xs bg-black/60 px-2 py-0.5 rounded">You</span>
+              </div>
+              {Object.entries(groupParticipants).map(([id, participant]) => (
+                <GroupCallTile key={id} participant={participant} isVideo={groupCallType === "video"} />
+              ))}
+            </div>
+            <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300">
+              <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+                <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+              </button>
+              {groupCallType === "video" && (
+                <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
+                  <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
+                </button>
+              )}
+              <i onClick={endGroupCall} className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"></i>
+            </div>
+          </div>
+        )}
+
+        {/* ===================== Incoming group call prompt ===================== */}
+        {incomingGroupCall && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[65] px-4">
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 text-center shadow-2xl">
+              <h2 className="text-xl font-bold text-green-400">
+                Incoming group {incomingGroupCall.callType} call
+              </h2>
+              <p className="text-gray-300 mt-2">
+                {allUsers.find((u) => u._id === incomingGroupCall.from)?.name || "Someone"} is calling the group.
+              </p>
+              <div className="mt-6 flex justify-center gap-4">
+                <button onClick={declineGroupCall} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg">Decline</button>
+                <button onClick={acceptGroupCall} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg">Join</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ===================== Create Room modal ===================== */}
@@ -3386,6 +3759,35 @@ const handleSelectRoom = async (room) => {
         </div>
       )}
     </>
+  );
+};
+
+// ✅ Small helper component for each remote participant tile in a group call.
+// Kept outside MainChat so each tile manages its own <video>/<audio> ref
+// without re-touching every other tile's DOM node on every render.
+const GroupCallTile = ({ participant, isVideo }) => {
+  const mediaRef = useRef(null);
+
+  useEffect(() => {
+    if (mediaRef.current && participant.stream) {
+      mediaRef.current.srcObject = participant.stream;
+    }
+  }, [participant.stream]);
+
+  return (
+    <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-300 min-h-[120px] relative">
+      {isVideo ? (
+        <video ref={mediaRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
+      ) : (
+        <>
+          <audio ref={mediaRef} autoPlay />
+          <i className="fa fa-microphone text-3xl"></i>
+        </>
+      )}
+      <span className="absolute bottom-1 left-1 text-xs bg-black/60 px-2 py-0.5 rounded truncate max-w-[90%]">
+        {participant.name}
+      </span>
+    </div>
   );
 };
 
