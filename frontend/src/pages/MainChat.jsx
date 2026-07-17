@@ -2933,10 +2933,10 @@ const handleSelectRoom = async (room) => {
                 Video Call
               </h2>
               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 sm:p-6">
-                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[140px]">
+                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
                   <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover rounded-xl" />
                 </div>
-                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[140px]">
+                <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-400 min-h-[100px]">
                   <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
                 </div>
               </div>

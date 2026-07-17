@@ -16,7 +16,9 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
+
 // Pass io to socket handler
+
 chatSocket(io);
 
 // Start server
