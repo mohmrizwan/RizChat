@@ -100,20 +100,12 @@ const chatSocket = (io) => {
       );
 
       const recipientSocketId = to && getReceiverSocketId(to.toString());
-      if (!recipientSocketId || !socket.userId) {
-        console.log(
-          `[webrtcSignal] BLOCKED — recipientSocketId=${recipientSocketId} socket.userId=${socket.userId}`
-        );
-        if (typeof callback === "function") {
-          callback({ delivered: false, message: "That user is offline or unavailable." });
-        }
-        return;
-      }
 
+      // Log the call attempt regardless of whether the recipient is
+      // currently online — an unreachable callee should still show up
+      // in call history as a missed call, not vanish silently.
       try {
-        if (callId && signal?.type === "offer") {
-          // First offer for this callId — create the log. Upsert guards
-          // against duplicate creation if an ICE-restart resends an offer.
+        if (callId && signal?.type === "offer" && socket.userId) {
           const result = await CallLog.findOneAndUpdate(
             { callId },
             {
@@ -142,6 +134,28 @@ const chatSocket = (io) => {
         }
       } catch (err) {
         console.error("[webrtcSignal] CallLog logging error:", err.message);
+      }
+
+      if (!recipientSocketId || !socket.userId) {
+        console.log(
+          `[webrtcSignal] Recipient unreachable — recipientSocketId=${recipientSocketId} socket.userId=${socket.userId}`
+        );
+        // Recipient isn't online to receive the offer at all — close the
+        // log out as missed right away instead of leaving it stuck "ringing".
+        try {
+          if (callId && signal?.type === "offer") {
+            await CallLog.findOneAndUpdate(
+              { callId },
+              { status: "missed", endedAt: new Date() }
+            );
+          }
+        } catch (err) {
+          console.error("[webrtcSignal] CallLog unreachable-close error:", err.message);
+        }
+        if (typeof callback === "function") {
+          callback({ delivered: false, message: "That user is offline or unavailable." });
+        }
+        return;
       }
 
       io.to(recipientSocketId).emit("webrtcSignal", {
