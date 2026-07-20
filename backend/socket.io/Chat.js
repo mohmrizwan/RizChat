@@ -22,6 +22,7 @@ const chatSocket = (io) => {
       socket.userId = userId;
 
       onlineUsers.set(userId, socket.id);
+      console.log(`[userOnline] Registered userId=${userId} -> socket=${socket.id}`);
 
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
@@ -94,8 +95,15 @@ const chatSocket = (io) => {
     // callId (crypto.randomUUID) on the caller's side and sends it with
     // every signal for that call, so we key the CallLog off that id.
     socket.on("webrtcSignal", async ({ to, signal, callType, callId }, callback) => {
+      console.log(
+        `[webrtcSignal] from=${socket.userId} to=${to} type=${signal?.type} callId=${callId}`
+      );
+
       const recipientSocketId = to && getReceiverSocketId(to.toString());
       if (!recipientSocketId || !socket.userId) {
+        console.log(
+          `[webrtcSignal] BLOCKED — recipientSocketId=${recipientSocketId} socket.userId=${socket.userId}`
+        );
         if (typeof callback === "function") {
           callback({ delivered: false, message: "That user is offline or unavailable." });
         }
@@ -106,7 +114,7 @@ const chatSocket = (io) => {
         if (callId && signal?.type === "offer") {
           // First offer for this callId — create the log. Upsert guards
           // against duplicate creation if an ICE-restart resends an offer.
-          await CallLog.findOneAndUpdate(
+          const result = await CallLog.findOneAndUpdate(
             { callId },
             {
               $setOnInsert: {
@@ -118,16 +126,22 @@ const chatSocket = (io) => {
                 startedAt: new Date(),
               },
             },
-            { upsert: true }
+            { upsert: true, new: true }
           );
+          console.log("[webrtcSignal] CallLog upserted on offer:", result?._id?.toString());
         } else if (callId && signal?.type === "answer") {
-          await CallLog.findOneAndUpdate(
+          const result = await CallLog.findOneAndUpdate(
             { callId, status: "ringing" },
-            { status: "answered" }
+            { status: "answered" },
+            { new: true }
+          );
+          console.log(
+            "[webrtcSignal] CallLog marked answered:",
+            result ? result._id.toString() : "NO MATCHING DOC FOUND"
           );
         }
       } catch (err) {
-        console.error("CallLog signal logging error:", err.message);
+        console.error("[webrtcSignal] CallLog logging error:", err.message);
       }
 
       io.to(recipientSocketId).emit("webrtcSignal", {
@@ -140,12 +154,18 @@ const chatSocket = (io) => {
     });
 
     socket.on("webrtcEnd", async ({ to, callId }) => {
+      console.log(`[webrtcEnd] from=${socket.userId} to=${to} callId=${callId}`);
+
       const recipientSocketId = to && getReceiverSocketId(to.toString());
 
       try {
         if (callId) {
           const call = await CallLog.findOne({ callId });
-          if (call && !call.endedAt) {
+          if (!call) {
+            console.log("[webrtcEnd] NO CallLog FOUND for callId:", callId);
+          } else if (call.endedAt) {
+            console.log("[webrtcEnd] Call already closed:", callId);
+          } else {
             const end = new Date();
             call.endedAt = end;
 
@@ -163,10 +183,13 @@ const chatSocket = (io) => {
             }
 
             await call.save();
+            console.log(
+              `[webrtcEnd] CallLog closed: status=${call.status} duration=${call.duration}`
+            );
           }
         }
       } catch (err) {
-        console.error("CallLog end logging error:", err.message);
+        console.error("[webrtcEnd] CallLog logging error:", err.message);
       }
 
       if (recipientSocketId && socket.userId) {
