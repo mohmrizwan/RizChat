@@ -12,16 +12,22 @@ const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [preview, setPreview] = useState(rizwan);
   const [user, setUser] = useState([]);
+
   const [refresh, setRefresh] = useState(false);
 
   // ✅ NEW: loading states for the two API calls in this file
   const [profileLoading, setProfileLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
-
   const getMediaUrl = (value) => {
     if (!value) return null;
+
     return /^https?:\/\//i.test(value) ? value : `${API_URL}/${value}`;
   };
+
+  const getAvatarUrl = (name) =>
+    "https://ui-avatars.com/api/?name=" +
+    encodeURIComponent(name || "?") +
+    "&background=1f2937&color=fff";
 
   const submitCall = async () => {
     try {
@@ -145,18 +151,17 @@ const UserProfile = () => {
             <div className="relative">
               <div className="w-24 h-24 rounded-full ring-[3px] ring-gray-900 shadow-[0_0_0_4px_rgba(74,222,128,0.15)] overflow-hidden bg-gray-800 flex items-center justify-center">
                 {profileLoading ? (
-                  <i className="fa fa-spinner fa-spin text-green-400 text-xl"></i>
+                  <i className="fa fa-spinner fa-spin text-green-500 text-xl"></i>
                 ) : (
                   <img
                     src={
-                      selectedFile
-                        ? preview
-                        : user.profilePic
-                          ? getMediaUrl(user.profilePic)
-                          : rizwan
+                      
+                      (user.profilePic
+                        ? getMediaUrl(user.profilePic)
+                        : getAvatarUrl(user.name))
                     }
-                    alt="Profile"
-                    className="w-full h-full object-cover"
+                    alt={user.name}
+                    className="w-24 h-24 rounded-full object-cover bg-gray-600"
                   />
                 )}
               </div>
@@ -313,9 +318,7 @@ const UserProfile = () => {
                   disabled={saveLoading}
                   className="flex-1 bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {saveLoading && (
-                    <i className="fa fa-spinner fa-spin"></i>
-                  )}
+                  {saveLoading && <i className="fa fa-spinner fa-spin"></i>}
                   {saveLoading ? "Saving..." : "Save changes"}
                 </button>
               </div>

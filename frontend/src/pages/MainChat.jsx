@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Loader from "../components/Loader";
+import CallLogsList from "../pages/CallLogsList";
 import socket, { connectSocket, disconnectSocket } from "../Socket/socket";
 import { jwtDecode } from "jwt-decode";
 import logo from "../assets/images/Copilot_20260715_194139.png";
@@ -21,6 +22,7 @@ const MainChat = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [showChats, setShowChats] = useState(true);
+  const [showCallLogs, setShowCallLogs] = useState(false);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showJoinRoom, setShowJoinRoom] = useState(false);
   const [roomName, setRoomName] = useState("");
@@ -1607,8 +1609,8 @@ const MainChat = () => {
     setIsCameraOff(nextCameraOff);
   };
 
-  const startCall = async (callType) => {
-    if (!selectedUser?._id) return;
+  const startCall = async (callType, targetUser = selectedUser) => {
+    if (!targetUser?._id) return;
     if ("Notification" in window && Notification.permission === "default") {
       void Notification.requestPermission();
     }
@@ -1619,7 +1621,7 @@ const MainChat = () => {
       createPeer({
         initiator: true,
         stream,
-        partnerId: selectedUser._id,
+        partnerId: targetUser._id,
         callType,
         callId,
       });
@@ -1671,6 +1673,12 @@ const MainChat = () => {
     } catch (error) {
       console.error("Unable to open caller's chat:", error);
     }
+  };
+
+  // Used by the Call Logs tab: open the chat for context, then place the call.
+  const callFromLog = async (user, callType) => {
+    await openChatWithUser(user._id);
+    startCall(callType, user);
   };
 
   const acceptIncomingCall = async () => {
@@ -2379,33 +2387,60 @@ const MainChat = () => {
               <div className="text-sm text-gray-400 uppercase">View</div>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => setShowChats(true)}
+                  onClick={() => {
+                    setShowCallLogs(false);
+                    setShowChats(true);
+                  }}
                   className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                    showChats
+                    showChats && !showCallLogs
                       ? "bg-green-600 text-white"
                       : "bg-gray-800 text-gray-300"
                   }`}
-                  aria-pressed={showChats}
+                  aria-pressed={showChats && !showCallLogs}
                 >
                   Chats
                 </button>
                 <button
-                  onClick={() => setShowChats(false)}
+                  onClick={() => {
+                    setShowCallLogs(false);
+                    setShowChats(false);
+                  }}
                   className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                    !showChats
+                    !showChats && !showCallLogs
                       ? "bg-green-600 text-white"
                       : "bg-gray-800 text-gray-300"
                   }`}
-                  aria-pressed={!showChats}
+                  aria-pressed={!showChats && !showCallLogs}
                 >
                   Groups
+                </button>
+                <button
+                  onClick={() => setShowCallLogs(true)}
+                  className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                    showCallLogs
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-800 text-gray-300"
+                  }`}
+                  aria-pressed={showCallLogs}
+                >
+                  Calls
                 </button>
               </div>
             </div>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-            {showChats ? (
+            {showCallLogs ? (
+              <>
+                <h3 className="text-sm uppercase text-gray-400 mb-2">Calls</h3>
+                <CallLogsList
+                  apiUrl={API_URL}
+                  currentUserId={currentUserId}
+                  onOpenChat={(user) => openChatWithUser(user._id)}
+                  onStartCall={callFromLog}
+                />
+              </>
+            ) : showChats ? (
               <>
                 <h3 className="text-sm uppercase text-gray-400 mb-2">Chats</h3>
                 {usersLoading ? (

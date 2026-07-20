@@ -8,6 +8,7 @@ import roomRoutes from "./routes/roomRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import privateChat from "./routes/conversationRoutes.js";
 import blockRoutes from "./routes/blockRoutes.js";
+import callLogRoutes from "./routes/callLogsRoutes.js";
 
 const app = express();
 
@@ -40,5 +41,6 @@ app.use("/room", roomRoutes);
 app.use("/message", messageRoutes);
 app.use("/block", blockRoutes);
 app.use("/privateChat", privateChat);
+app.use("/callLog", callLogRoutes);
 
 export default app;

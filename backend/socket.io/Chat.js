@@ -1,4 +1,5 @@
 // socket.io/Chat.js
+import CallLog from "../models/CallLogsModel.js";
 
 const onlineUsers = new Map();
 
@@ -44,22 +45,14 @@ const chatSocket = (io) => {
     });
 
     // client did.
-   socket.on("joinConversation", (conversationId, callback) => {
+    socket.on("joinConversation", (conversationId, callback) => {
+      console.log("JOIN PRIVATE ROOM:", conversationId);
 
-  console.log(
-    "JOIN PRIVATE ROOM:",
-    conversationId
-  );
+      socket.join(conversationId.toString());
+      if (typeof callback === "function") callback();
 
-  socket.join(conversationId.toString());
-  if (typeof callback === "function") callback();
-
-  console.log(
-    "CURRENT ROOMS:",
-    [...socket.rooms]
-  );
-
-});
+      console.log("CURRENT ROOMS:", [...socket.rooms]);
+    });
 
     // ✅ NEW — Leave private conversation room (mirrors leaveRoom)
     socket.on("leaveConversation", (conversationId) => {
@@ -97,8 +90,10 @@ const chatSocket = (io) => {
     });
 
     // Socket.IO is only used to exchange WebRTC signalling data; call media
-    // remains peer-to-peer between browsers.
-    socket.on("webrtcSignal", ({ to, signal, callType, callId }, callback) => {
+    // remains peer-to-peer between browsers. The frontend generates a
+    // callId (crypto.randomUUID) on the caller's side and sends it with
+    // every signal for that call, so we key the CallLog off that id.
+    socket.on("webrtcSignal", async ({ to, signal, callType, callId }, callback) => {
       const recipientSocketId = to && getReceiverSocketId(to.toString());
       if (!recipientSocketId || !socket.userId) {
         if (typeof callback === "function") {
@@ -106,6 +101,35 @@ const chatSocket = (io) => {
         }
         return;
       }
+
+      try {
+        if (callId && signal?.type === "offer") {
+          // First offer for this callId — create the log. Upsert guards
+          // against duplicate creation if an ICE-restart resends an offer.
+          await CallLog.findOneAndUpdate(
+            { callId },
+            {
+              $setOnInsert: {
+                callId,
+                caller: socket.userId,
+                receiver: to,
+                type: callType === "video" ? "video" : "audio",
+                status: "ringing",
+                startedAt: new Date(),
+              },
+            },
+            { upsert: true }
+          );
+        } else if (callId && signal?.type === "answer") {
+          await CallLog.findOneAndUpdate(
+            { callId, status: "ringing" },
+            { status: "answered" }
+          );
+        }
+      } catch (err) {
+        console.error("CallLog signal logging error:", err.message);
+      }
+
       io.to(recipientSocketId).emit("webrtcSignal", {
         from: socket.userId,
         signal,
@@ -115,10 +139,41 @@ const chatSocket = (io) => {
       if (typeof callback === "function") callback({ delivered: true });
     });
 
-    socket.on("webrtcEnd", ({ to, callId }) => {
+    socket.on("webrtcEnd", async ({ to, callId }) => {
       const recipientSocketId = to && getReceiverSocketId(to.toString());
+
+      try {
+        if (callId) {
+          const call = await CallLog.findOne({ callId });
+          if (call && !call.endedAt) {
+            const end = new Date();
+            call.endedAt = end;
+
+            if (call.status === "answered") {
+              call.duration = Math.max(
+                0,
+                Math.floor((end - call.startedAt) / 1000)
+              );
+            } else if (socket.userId?.toString() === call.receiver.toString()) {
+              // Receiver ended it before answering = declined.
+              call.status = "rejected";
+            } else {
+              // Caller ended it before the other side answered = cancelled/no answer.
+              call.status = "missed";
+            }
+
+            await call.save();
+          }
+        }
+      } catch (err) {
+        console.error("CallLog end logging error:", err.message);
+      }
+
       if (recipientSocketId && socket.userId) {
-        io.to(recipientSocketId).emit("webrtcEnd", { from: socket.userId, callId });
+        io.to(recipientSocketId).emit("webrtcEnd", {
+          from: socket.userId,
+          callId,
+        });
       }
     });
 

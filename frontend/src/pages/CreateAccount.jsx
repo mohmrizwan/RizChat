@@ -10,6 +10,7 @@ import { connectSocket } from "../Socket/socket";
 
 const CreateAccount = () => {
   const navigate = useNavigate();
+
   const [loading, setLoading] = useState(false);
   const {
     register,
@@ -22,10 +23,7 @@ const CreateAccount = () => {
       setLoading(true);
 
       const API_URL = import.meta.env.VITE_API_URL;
-      const response = await axios.post(
-        `${API_URL}/user/createAccount`,
-        data,
-      );
+      const response = await axios.post(`${API_URL}/user/createAccount`, data);
 
       if (response.status === 201) {
         Swal.fire({
@@ -90,6 +88,15 @@ const CreateAccount = () => {
                     minLength: {
                       value: 3,
                       message: "Username Must be at least 3 characters",
+                    },
+                    maxLength: {
+                      value: 12,
+                      message: "Maximum 12 characters",
+                    },
+                    pattern: {
+                      value: /^(?=.*[a-zA-Z])[a-zA-Z0-9_]{3,20}$/,
+                      message:
+                        "Only letters, numbers, and underscores are allowed",
                     },
                   })}
                 />
@@ -167,10 +174,17 @@ const CreateAccount = () => {
                   className="bg-transparent outline-none text-gray-200 placeholder-gray-500 w-full"
                   {...register("phone", {
                     required: "Phone number is required",
-                    pattern: {
-                      value: /^[0-9]{10}$/,
-                      message: "Must be 10 digits",
+                    minLength: {
+                      value: 10,
+                      message: "Phone number Must be at least 10 digits",
                     },
+                    pattern: {
+                      value: /^[6-9]\d{9}$/,
+                      message: "Enter valid phone number",
+                    },
+                    validate: (value) =>
+                      !/^(\d)\1{9}$/.test(value) ||
+                      "Phone number cannot have all  digits same",
                   })}
                 />
               </div>
