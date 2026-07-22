@@ -43,6 +43,7 @@ const MainChat = () => {
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [privateMessage, setPrivateMessage] = useState([]);
+  const [callLogsForChat, setCallLogsForChat] = useState([]);
   const [privateMessagesLoading, setPrivateMessagesLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
@@ -1258,12 +1259,27 @@ const MainChat = () => {
       await joinConversationWithAck(conversation._id);
       await markPrivateSeen(conversation._id);
       await getPrivateMessages(conversation._id);
+      getCallLogsForChat(user._id);
     } catch (error) {
       Swal.fire({
         icon: "error",
         title: "Oops...",
         text: error.response?.data?.message || "Something went wrong",
       });
+    }
+  };
+
+  const getCallLogsForChat = async (otherUserId) => {
+    if (!otherUserId) return;
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `${API_URL}/callLog/betweenUsers/${otherUserId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setCallLogsForChat(response.data.calls || []);
+    } catch (error) {
+      console.error("Unable to load call logs for chat:", error);
     }
   };
 
@@ -1468,6 +1484,11 @@ const MainChat = () => {
     setIsMuted(false);
     setIsCameraOff(false);
     setIncomingCall(null);
+
+    // Server needs a moment to write the CallLog before we re-fetch it.
+    if (partnerId && selectedUser?._id === partnerId) {
+      setTimeout(() => getCallLogsForChat(partnerId), 800);
+    }
   };
 
   const createPeer = ({ initiator, stream, partnerId, callType, callId }) => {
@@ -1611,6 +1632,14 @@ const MainChat = () => {
 
   const startCall = async (callType, targetUser = selectedUser) => {
     if (!targetUser?._id) return;
+    if (!socket.connected) {
+      Swal.fire(
+        "Reconnecting...",
+        "Your connection dropped for a moment. Please wait and try again.",
+        "info",
+      );
+      return;
+    }
     if ("Notification" in window && Notification.permission === "default") {
       void Notification.requestPermission();
     }
@@ -1670,6 +1699,7 @@ const MainChat = () => {
       await joinConversationWithAck(conversation._id);
       await markPrivateSeen(conversation._id);
       await getPrivateMessages(conversation._id);
+      getCallLogsForChat(user._id);
     } catch (error) {
       console.error("Unable to open caller's chat:", error);
     }
@@ -3059,14 +3089,32 @@ const MainChat = () => {
                     </p>
                   </div>
                 ) : (
-                  privateMessage.map((msg, index) => {
-                    const isMe = msg.sender._id === currentUserId;
+                  (() => {
+                  const chatTimeline = [
+                    ...privateMessage.map((m) => ({
+                      type: "message",
+                      createdAt: m.createdAt,
+                      key: `msg-${m._id}`,
+                      data: m,
+                    })),
+                    ...callLogsForChat.map((c) => ({
+                      type: "call",
+                      createdAt: c.createdAt,
+                      key: `call-${c._id}`,
+                      data: c,
+                    })),
+                  ].sort(
+                    (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+                  );
 
-                    const currentDate = new Date(msg.createdAt).toDateString();
+                  return chatTimeline.map((item, index) => {
+                    const currentDate = new Date(
+                      item.createdAt,
+                    ).toDateString();
                     const prevDate =
                       index > 0
                         ? new Date(
-                            privateMessage[index - 1].createdAt,
+                            chatTimeline[index - 1].createdAt,
                           ).toDateString()
                         : null;
                     const showDateDivider = currentDate !== prevDate;
@@ -3081,6 +3129,66 @@ const MainChat = () => {
                         : currentDate === yesterday
                           ? "Yesterday"
                           : currentDate;
+
+                    if (item.type === "call") {
+                      const call = item.data;
+                      const isOutgoing = call.caller === currentUserId;
+                      const missed = ["missed", "rejected", "cancelled"].includes(
+                        call.status,
+                      );
+                      const callStatusLabel = {
+                        ringing: "Not answered",
+                        answered: "Answered",
+                        missed: "No answer",
+                        rejected: "Declined",
+                        cancelled: "Missed",
+                      }[call.status] || call.status;
+                      const durationLabel =
+                        call.duration > 0
+                          ? ` · ${Math.floor(call.duration / 60)}m ${
+                              call.duration % 60
+                            }s`
+                          : "";
+
+                      return (
+                        <React.Fragment key={item.key}>
+                          {showDateDivider && (
+                            <div className="flex justify-center my-3">
+                              <span className="text-xs text-gray-400 bg-gray-800 px-3 py-1 rounded-full shadow-md">
+                                {dateLabel}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-center my-1">
+                            <div
+                              className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-gray-800/70 ${
+                                missed ? "text-red-400" : "text-gray-300"
+                              }`}
+                            >
+                              <i
+                                className={`fa fa-${
+                                  call.type === "video" ? "video-camera" : "phone"
+                                }`}
+                              ></i>
+                              <span>
+                                {isOutgoing ? "Outgoing" : "Incoming"}{" "}
+                                {call.type} call · {callStatusLabel}
+                                {durationLabel}
+                              </span>
+                              <span className="text-gray-500">
+                                {new Date(call.createdAt).toLocaleTimeString(
+                                  [],
+                                  { hour: "2-digit", minute: "2-digit" },
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </React.Fragment>
+                      );
+                    }
+
+                    const msg = item.data;
+                    const isMe = msg.sender._id === currentUserId;
 
                     return (
                       <React.Fragment key={msg._id}>
@@ -3213,7 +3321,8 @@ const MainChat = () => {
                         </div>
                       </React.Fragment>
                     );
-                  })
+                  });
+                })()
                 )}
                 <div ref={messagesEndRef}></div>
               </section>
