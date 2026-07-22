@@ -1,4 +1,5 @@
 // socket.io/Chat.js
+console.log("=== CALLLOG_DEBUG_BUILD_v2 — Chat.js loaded ===");
 import CallLog from "../models/CallLogsModel.js";
 
 const onlineUsers = new Map();
