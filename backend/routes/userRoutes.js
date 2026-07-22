@@ -15,7 +15,7 @@ router.post("/createAccount", createUser);
 router.post("/login", loginUser);
 router.post("/logout", Logout);
 router.put("/updateProfile", isLoggedIn, upload.single("profilePic"), updateUser);
-router.get("/allUsers", getAllUsers);
+router.get("/allUsers", isLoggedIn, getAllUsers);
 router.get("/profile", isLoggedIn, getProfile);
 
 export default router;
