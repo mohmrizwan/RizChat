@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Loader from "../components/Loader";
-import CallLogsList from "../pages/CallLogsList";
+import CallLogsList from "../components/CallLogsList";
 import socket, { connectSocket, disconnectSocket } from "../Socket/socket";
 import { jwtDecode } from "jwt-decode";
 import logo from "../assets/images/Copilot_20260715_194139.png";
@@ -63,6 +63,7 @@ const MainChat = () => {
   const menuRef = useRef(null);
   const selectedRoomIdRef = useRef(null);
   const selectedConversationIdRef = useRef(null);
+  const selectedCallLogsUserIdRef = useRef(null);
   const receivedPrivateMessageIdsRef = useRef(new Set());
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -1243,6 +1244,7 @@ const MainChat = () => {
       setShowGroupInfo(false);
       setShowChatInfo(false);
       setPrivateMessage([]); // clear old conversation's messages immediately
+      setCallLogsForChat([]); // clear old conversation's call logs immediately
       setConversationUserMap((prev) => ({
         ...prev,
         [conversation._id]: { userId: user._id, userName: user.name },
@@ -1258,7 +1260,7 @@ const MainChat = () => {
 
       await joinConversationWithAck(conversation._id);
       await markPrivateSeen(conversation._id);
-      await getPrivateMessages(conversation._id);
+      await getPrivateMessages(conversation._id, user._id);
       getCallLogsForChat(user._id);
     } catch (error) {
       Swal.fire({
@@ -1271,19 +1273,25 @@ const MainChat = () => {
 
   const getCallLogsForChat = async (otherUserId) => {
     if (!otherUserId) return;
+    selectedCallLogsUserIdRef.current = otherUserId;
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
         `${API_URL}/callLog/betweenUsers/${otherUserId}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
+      // Discard this response if the user has already switched to a
+      // different chat before it arrived — otherwise a slow response for
+      // chat A can land after the person opened chat B, leaking A's calls
+      // into B's timeline.
+      if (selectedCallLogsUserIdRef.current !== otherUserId) return;
       setCallLogsForChat(response.data.calls || []);
     } catch (error) {
       console.error("Unable to load call logs for chat:", error);
     }
   };
 
-  const getPrivateMessages = async (conversationId) => {
+  const getPrivateMessages = async (conversationId, forUserId) => {
     try {
       setPrivateMessagesLoading(true);
       const token = localStorage.getItem("token");
@@ -1307,9 +1315,14 @@ const MainChat = () => {
         return [...fetched, ...pendingLocal];
       });
 
-      if (fetched.length && selectedUser?._id) {
+      // Use the explicitly-passed userId for this conversation rather than
+      // the `selectedUser` state, which can still be pointing at the
+      // previously-open chat if this resolves before that state commits —
+      // otherwise the wrong contact's sidebar preview gets updated.
+      const targetUserId = forUserId || selectedUser?._id;
+      if (fetched.length && targetUserId) {
         const lastMessage = fetched[fetched.length - 1];
-        updatePrivateSidebar(selectedUser._id, lastMessage, conversationId, 0);
+        updatePrivateSidebar(targetUserId, lastMessage, conversationId, 0);
       }
     } catch (error) {
       console.log(error);
@@ -1691,6 +1704,7 @@ const MainChat = () => {
       setMobileView("chat");
       setShowGroupInfo(false);
       setShowChatInfo(false);
+      setCallLogsForChat([]); // clear old conversation's call logs immediately
       setConversationUserMap((prev) => ({
         ...prev,
         [conversation._id]: { userId: user._id, userName: user.name },
@@ -1698,7 +1712,7 @@ const MainChat = () => {
 
       await joinConversationWithAck(conversation._id);
       await markPrivateSeen(conversation._id);
-      await getPrivateMessages(conversation._id);
+      await getPrivateMessages(conversation._id, user._id);
       getCallLogsForChat(user._id);
     } catch (error) {
       console.error("Unable to open caller's chat:", error);
