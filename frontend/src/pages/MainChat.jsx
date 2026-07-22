@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Loader from "../components/Loader";
-import CallLogsList from "../components/CallLogsList";
+import CallLogsList from "../pages/CallLogsList";
 import socket, { connectSocket, disconnectSocket } from "../Socket/socket";
 import { jwtDecode } from "jwt-decode";
 import logo from "../assets/images/Copilot_20260715_194139.png";
