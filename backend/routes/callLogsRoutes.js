@@ -1,5 +1,5 @@
 import express from "express";
-import { getMyCallLogs, getCallLogsBetweenUsers } from "../controllers/callLogController.js";
+import { getMyCallLogs, getCallLogsBetweenUsers } from "../controllers/CallLogsController.js"
 import isLoggedIn from "../middleware/isLoggedIn.js";
 
 const router = express.Router();
