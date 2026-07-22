@@ -38,6 +38,8 @@ const MainChat = () => {
   const API_URL = import.meta.env.VITE_API_URL;
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [openMsgMenuId, setOpenMsgMenuId] = useState(null);
   const [mobileView, setMobileView] = useState("list");
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
@@ -187,7 +189,22 @@ const MainChat = () => {
     });
 
   const handleReply = (msg) => {
+    setEditingMessage(null);
     setReplyingTo(msg);
+  };
+
+  const handleEditStart = (msg) => {
+    setReplyingTo(null);
+    setEditingMessage(msg);
+    setText(msg.text || "");
+    requestAnimationFrame(() => {
+      textInputRef.current?.focus();
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setText("");
   };
 
   const updateRoomSidebar = (roomId, message, unreadDelta = 0) => {
@@ -581,7 +598,19 @@ const MainChat = () => {
   useEffect(() => {
     setTypingUser(null);
     setReplyingTo(null);
+    setEditingMessage(null);
   }, [selectedConversation?._id, selectedRoom?._id]);
+
+  // ✅ Close the message 3-dot menu when clicking anywhere outside it
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest?.("[data-msg-menu-root]")) {
+        setOpenMsgMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // ✅ Reset info panels whenever the active chat changes
   useEffect(() => {
@@ -687,6 +716,38 @@ const MainChat = () => {
 
     socket.on("messageDeleted", handleDeleted);
     return () => socket.off("messageDeleted", handleDeleted);
+  }, []);
+
+  useEffect(() => {
+    const handleMessageEdited = ({ messageId, text, isEdited, editedAt }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg._id === messageId ? { ...msg, text, isEdited, editedAt } : msg,
+        ),
+      );
+    };
+
+    socket.on("messageEdited", handleMessageEdited);
+    return () => socket.off("messageEdited", handleMessageEdited);
+  }, []);
+
+  useEffect(() => {
+    const handlePrivateMessageEdited = ({
+      messageId,
+      text,
+      isEdited,
+      editedAt,
+    }) => {
+      setPrivateMessage((prev) =>
+        prev.map((msg) =>
+          msg._id === messageId ? { ...msg, text, isEdited, editedAt } : msg,
+        ),
+      );
+    };
+
+    socket.on("privateMessageEdited", handlePrivateMessageEdited);
+    return () =>
+      socket.off("privateMessageEdited", handlePrivateMessageEdited);
   }, []);
 
   useEffect(() => {
@@ -1083,6 +1144,48 @@ const MainChat = () => {
       }
     } finally {
       setDeleteRoomLoading(false);
+    }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingMessage || text.trim() === "") return;
+    try {
+      setSendingMessage(true);
+      const token = localStorage.getItem("token");
+      const isPrivate = !!selectedConversation;
+
+      const endpoint = isPrivate
+        ? `${API_URL}/privateChat/editPrivateMessage/${editingMessage._id}`
+        : `${API_URL}/message/editMessage/${editingMessage._id}`;
+
+      const response = await axios.put(
+        endpoint,
+        { text: text.trim() },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      const updated = response.data.updatedMessage;
+
+      if (isPrivate) {
+        setPrivateMessage((prev) =>
+          prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m)),
+        );
+      } else {
+        setMessages((prev) =>
+          prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m)),
+        );
+      }
+
+      setEditingMessage(null);
+      setText("");
+    } catch (error) {
+      Swal.fire({
+        icon: "error",
+        title: "Oops...",
+        text: error.response?.data?.message || "Something went wrong",
+      });
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -2241,7 +2344,9 @@ const MainChat = () => {
     };
 
     try {
-      if (selectedConversation) {
+      if (editingMessage) {
+        handleEditSubmit().finally(finish);
+      } else if (selectedConversation) {
         sendPrivateMessage().finally(finish);
       } else if (selectedRoom) {
         sendMessage().finally(finish);
@@ -2884,13 +2989,20 @@ const MainChat = () => {
                                 )}
 
                                 {msg.text && <p>{msg.text}</p>}
+                                {msg.isEdited && !msg.isDeleted && (
+                                  <span className="block text-[10px] text-gray-300/70 italic mt-0.5">
+                                    (edited)
+                                  </span>
+                                )}
                               </div>
 
-                              <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition flex items-center gap-1 shrink-0">
+                              <div className="relative shrink-0" data-msg-menu-root>
                                 <button
-                                  onClick={() => handleReply(msg)}
-                                  className="text-gray-400 hover:text-green-400 p-1.5 rounded-full hover:bg-gray-800 transition"
-                                  aria-label="Reply"
+                                  onClick={() =>
+                                    setOpenMsgMenuId((prev) => (prev === msg._id ? null : msg._id))
+                                  }
+                                  className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-gray-800 transition"
+                                  aria-label="Message options"
                                 >
                                   <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -2898,33 +3010,50 @@ const MainChat = () => {
                                     viewBox="0 0 20 20"
                                     fill="currentColor"
                                   >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                                      clipRule="evenodd"
-                                    />
+                                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
                                   </svg>
                                 </button>
 
-                                {isMe && (
-                                  <button
-                                    onClick={() => handleDelete(msg._id)}
-                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-gray-800 transition"
-                                    aria-label="Delete"
+                                {openMsgMenuId === msg._id && (
+                                  <div
+                                    className={`absolute z-20 top-full mt-1 w-32 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden ${
+                                      isMe ? "right-0" : "left-0"
+                                    }`}
                                   >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-4 w-4"
-                                      viewBox="0 0 20 20"
-                                      fill="currentColor"
+                                    <button
+                                      onClick={() => {
+                                        handleReply(msg);
+                                        setOpenMsgMenuId(null);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
                                     >
-                                      <path
-                                        fillRule="evenodd"
-                                        d="M9 2a1 1 0 00-1 1v1H4a1 1 0 000 2h12a1 1 0 100-2h-4V3a1 1 0 00-1-1H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                        clipRule="evenodd"
-                                      />
-                                    </svg>
-                                  </button>
+                                      Reply
+                                    </button>
+
+                                    {isMe && !msg.isDeleted && (
+                                      <button
+                                        onClick={() => {
+                                          handleEditStart(msg);
+                                          setOpenMsgMenuId(null);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
+
+                                    {isMe && (
+                                      <button
+                                        onClick={() => {
+                                          handleDelete(msg._id);
+                                          setOpenMsgMenuId(null);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-gray-700 transition"
+                                      >
+                                        Delete
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -2948,6 +3077,32 @@ const MainChat = () => {
                   </>
                 )}
               </section>
+
+              {editingMessage && (
+                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-yellow-900/30 border-t border-yellow-700/40 flex items-center justify-between gap-3 shrink-0">
+                  <div className="text-sm text-yellow-200 min-w-0 truncate">
+                    Editing message
+                  </div>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="text-yellow-200 hover:text-white p-1 rounded-full hover:bg-yellow-800/50 transition shrink-0"
+                    aria-label="Cancel edit"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
 
               {replyingTo && (
                 <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3 shrink-0">
@@ -3345,33 +3500,20 @@ const MainChat = () => {
                               )}
 
                               {msg.text && <p>{msg.text}</p>}
+                              {msg.isEdited && !msg.isDeleted && (
+                                <span className="block text-[10px] text-gray-300/70 italic mt-0.5">
+                                  (edited)
+                                </span>
+                              )}
                             </div>
 
-                            <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => handleReply(msg)}
-                                className="text-gray-400 hover:text-green-400 p-1.5 rounded-full hover:bg-gray-800 transition"
-                                aria-label="Reply"
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="h-4 w-4"
-                                  viewBox="0 0 20 20"
-                                  fill="currentColor"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
-                              </button>
-
-                              {isMe && (
+                              <div className="relative shrink-0" data-msg-menu-root>
                                 <button
-                                  onClick={() => handleDelete(msg._id)}
-                                  className="text-gray-400 hover:text-red-500 p-1.5 rounded-full hover:bg-gray-800 transition"
-                                  aria-label="Delete"
+                                  onClick={() =>
+                                    setOpenMsgMenuId((prev) => (prev === msg._id ? null : msg._id))
+                                  }
+                                  className="text-gray-400 hover:text-white p-1.5 rounded-full hover:bg-gray-800 transition"
+                                  aria-label="Message options"
                                 >
                                   <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -3379,15 +3521,52 @@ const MainChat = () => {
                                     viewBox="0 0 20 20"
                                     fill="currentColor"
                                   >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M9 2a1 1 0 00-1 1v1H4a1 1 0 000 2h12a1 1 0 100-2h-4V3a1 1 0 00-1-1H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                      clipRule="evenodd"
-                                    />
+                                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
                                   </svg>
                                 </button>
-                              )}
-                            </div>
+
+                                {openMsgMenuId === msg._id && (
+                                  <div
+                                    className={`absolute z-20 top-full mt-1 w-32 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden ${
+                                      isMe ? "right-0" : "left-0"
+                                    }`}
+                                  >
+                                    <button
+                                      onClick={() => {
+                                        handleReply(msg);
+                                        setOpenMsgMenuId(null);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                                    >
+                                      Reply
+                                    </button>
+
+                                    {isMe && !msg.isDeleted && (
+                                      <button
+                                        onClick={() => {
+                                          handleEditStart(msg);
+                                          setOpenMsgMenuId(null);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
+
+                                    {isMe && (
+                                      <button
+                                        onClick={() => {
+                                          handleDelete(msg._id);
+                                          setOpenMsgMenuId(null);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-gray-700 transition"
+                                      >
+                                        Delete
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                           </div>
 
                           {isMe && (
@@ -3409,6 +3588,32 @@ const MainChat = () => {
                 )}
                 <div ref={messagesEndRef}></div>
               </section>
+
+              {editingMessage && (
+                <div className="px-3 sm:px-4 lg:px-6 py-2 bg-yellow-900/30 border-t border-yellow-700/40 flex items-center justify-between gap-3 shrink-0">
+                  <div className="text-sm text-yellow-200 min-w-0 truncate">
+                    Editing message
+                  </div>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="text-yellow-200 hover:text-white p-1 rounded-full hover:bg-yellow-800/50 transition shrink-0"
+                    aria-label="Cancel edit"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
 
               {replyingTo && (
                 <div className="px-3 sm:px-4 lg:px-6 py-2 bg-gray-800/80 border-t border-gray-800 flex items-center justify-between gap-3 shrink-0">
