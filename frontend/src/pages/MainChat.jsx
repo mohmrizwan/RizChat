@@ -881,7 +881,29 @@ const MainChat = () => {
           Authorization: `Bearer ${token}`,
         },
       });
-      setallRooms(response.data.myRooms);
+      const rooms = response.data.myRooms || [];
+      setallRooms(rooms);
+
+      // ✅ FIX: seed roomActivity right away from the room documents'
+      // own lastMessage/lastMessageAt fields (already returned by this API).
+      // Without this, a room's sidebar position only becomes correct AFTER
+      // you open it — which looked like "clicking a chat jumps it to top".
+      setRoomActivity((prev) => {
+        const next = { ...prev };
+        rooms.forEach((room) => {
+          const key = room._id?.toString();
+          if (!key) return;
+          // don't clobber activity we've already learned from sockets/opening the room
+          if (next[key]) return;
+          if (!room.lastMessageAt) return;
+          next[key] = {
+            lastMessage: room.lastMessage || "",
+            lastMessageAt: room.lastMessageAt,
+            unreadCount: 0,
+          };
+        });
+        return next;
+      });
     } catch (error) {
       console.log(error);
     } finally {
@@ -889,8 +911,55 @@ const MainChat = () => {
     }
   };
 
+  const getConversations = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await axios.get(
+        `${API_URL}/privateChat/allConversations`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      const conversations = response.data.conversations || [];
+
+      // ✅ FIX: seed privateChatActivity + conversationUserMap right away from
+      // the bulk conversations endpoint, so private chats sort correctly on
+      // page load instead of only after you open each one.
+      setPrivateChatActivity((prev) => {
+        const next = { ...prev };
+        conversations.forEach((conv) => {
+          const key = conv.otherUserId?.toString();
+          if (!key || next[key]) return;
+          if (!conv.lastMessageAt) return;
+          next[key] = {
+            conversationId: conv.conversationId,
+            lastMessage: createMessagePreview(conv.lastMessage),
+            lastMessageAt: conv.lastMessageAt,
+            unreadCount: conv.unreadCount || 0,
+          };
+        });
+        return next;
+      });
+
+      setConversationUserMap((prev) => {
+        const next = { ...prev };
+        conversations.forEach((conv) => {
+          const convKey = conv.conversationId?.toString();
+          if (!convKey || next[convKey]) return;
+          next[convKey] = { userId: conv.otherUserId };
+        });
+        return next;
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   useEffect(() => {
     getRooms();
+    getConversations();
   }, []);
 
   const joinRoom = async () => {
