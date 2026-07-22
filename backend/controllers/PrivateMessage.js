@@ -245,6 +245,87 @@ export const deletePrivateMessage = async (req, res) => {
     });
   }
 };
+export const editPrivateMessage = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const { messageId } = req.params;
+    const { text } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: "Message can't be empty" });
+    }
+
+    const message = await privateChatModel.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.sender.toString() !== userId.toString()) {
+      return res.status(403).json({
+        message: "You can only edit your own messages",
+      });
+    }
+
+    if (message.isDeleted) {
+      return res.status(400).json({
+        message: "Deleted messages can't be edited",
+      });
+    }
+
+    message.text = text.trim();
+    message.isEdited = true;
+    message.editedAt = new Date();
+    await message.save();
+
+    // Note: conversation.lastMessage stores a reference (not denormalized
+    // text), so the sidebar preview stays correct automatically here.
+
+    const io = req.app.get("io");
+    const conversation = await conversationModel.findById(message.conversation);
+
+    if (io && conversation) {
+      const payload = {
+        messageId: message._id,
+        conversationId: message.conversation,
+        text: message.text,
+        isEdited: true,
+        editedAt: message.editedAt,
+      };
+
+      io.to(message.conversation.toString()).emit("privateMessageEdited", payload);
+
+      conversation.participants.forEach((participantId) => {
+        const participantSocketId = getReceiverSocketId(
+          participantId.toString(),
+        );
+        if (participantSocketId) {
+          io.to(participantSocketId).emit("privateMessageEdited", payload);
+        }
+      });
+    }
+
+    return res.status(200).json({
+      message: "Message updated successfully",
+      updatedMessage: {
+        _id: message._id,
+        text: message.text,
+        isEdited: message.isEdited,
+        editedAt: message.editedAt,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      message: "Something went wrong",
+    });
+  }
+};
+
 export const seenPrivateMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
