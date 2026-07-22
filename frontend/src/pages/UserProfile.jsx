@@ -251,7 +251,7 @@ const UserProfile = () => {
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center shrink-0 mt-0.5">
-                    <i className="fa fa-envelope text-green-400 text-sm"></i>
+                 <i class="fa-solid fa-phone text-sm text-green-400"></i>
                   </div>
                   <div className="min-w-0">
                     <p className="text-[11px] uppercase tracking-widest text-gray-500 mb-0.5">
