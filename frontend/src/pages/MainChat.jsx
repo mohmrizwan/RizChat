@@ -78,6 +78,7 @@ const MainChat = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const groupLocalVideoRef = useRef(null);
 
   const [conversationUserMap, setConversationUserMap] = useState({});
 
@@ -1994,6 +1995,12 @@ const MainChat = () => {
   useEffect(() => {
     incomingGroupCallRef.current = incomingGroupCall;
   }, [incomingGroupCall]);
+
+  useEffect(() => {
+    if (groupLocalVideoRef.current && groupLocalStreamRef.current) {
+      groupLocalVideoRef.current.srcObject = groupLocalStreamRef.current;
+    }
+  }, [groupCallType, isCameraOff]);
 
   const removeGroupPeer = (peerId) => {
     const peer = groupPeersRef.current[peerId];
@@ -4191,14 +4198,76 @@ const MainChat = () => {
         {/* ===================== Group call overlay ===================== */}
  {groupCallType && (
   <div className="fixed inset-0 bg-black/90 flex flex-col z-[55] px-2 sm:px-4">
-    <h2 className="text-green-400 text-center text-lg sm:text-xl font-bold mt-4 shrink-0">
-      {selectedRoom?.roomName || "Group"} call
-    </h2>
-    <div className="flex-1 min-h-0 grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 sm:p-6 overflow-y-auto content-start">
-      {/* ...unchanged tiles... */}
+    <div className="shrink-0 mt-4 text-center">
+      <h2 className="text-green-400 text-lg sm:text-xl font-bold">
+        {selectedRoom?.roomName || "Group"} call
+      </h2>
+      <p className="text-gray-400 text-xs sm:text-sm mt-1">
+        {Object.keys(groupParticipants).length + 1} participant
+        {Object.keys(groupParticipants).length !== 0 ? "s" : ""} ·{" "}
+        {groupCallType === "video" ? "Video" : "Audio"}
+      </p>
     </div>
-    <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300 shrink-0">
-      {/* ...unchanged controls... */}
+
+    <div className="flex-1 min-h-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 p-3 sm:p-6 overflow-y-auto content-start">
+      {/* Self preview tile */}
+      <div className="bg-gray-800 rounded-xl flex items-center justify-center text-gray-300 min-h-[110px] sm:min-h-[140px] relative">
+        {groupCallType === "video" && !isCameraOff ? (
+          <video
+            ref={groupLocalVideoRef}
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full object-cover rounded-xl scale-x-[-1]"
+          />
+        ) : (
+          <i className="fa fa-microphone text-2xl sm:text-3xl"></i>
+        )}
+        <span className="absolute bottom-1 left-1 text-xs bg-black/60 px-2 py-0.5 rounded truncate max-w-[90%]">
+          You{isMuted ? " (muted)" : ""}
+        </span>
+      </div>
+
+      {/* Remote participant tiles */}
+      {Object.entries(groupParticipants).map(([peerId, participant]) => (
+        <GroupCallTile
+          key={peerId}
+          participant={participant}
+          isVideo={groupCallType === "video"}
+        />
+      ))}
+    </div>
+
+    <div className="flex justify-center items-center gap-6 sm:gap-8 p-4 sm:p-6 text-2xl text-gray-300 shrink-0">
+      <button
+        onClick={toggleMute}
+        aria-label={isMuted ? "Unmute" : "Mute"}
+        className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full transition-colors ${
+          isMuted ? "bg-red-600 text-white" : "bg-gray-700 hover:bg-gray-600"
+        }`}
+      >
+        <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
+      </button>
+
+      {groupCallType === "video" && (
+        <button
+          onClick={toggleCamera}
+          aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"}
+          className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full transition-colors ${
+            isCameraOff ? "bg-red-600 text-white" : "bg-gray-700 hover:bg-gray-600"
+          }`}
+        >
+          <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
+        </button>
+      )}
+
+      <button
+        onClick={endGroupCall}
+        aria-label="Cancel call"
+        className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white"
+      >
+        <i className="fa fa-phone-slash"></i>
+      </button>
     </div>
   </div>
 )}

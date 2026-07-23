@@ -95,46 +95,53 @@ const chatSocket = (io) => {
     // remains peer-to-peer between browsers. The frontend generates a
     // callId (crypto.randomUUID) on the caller's side and sends it with
     // every signal for that call, so we key the CallLog off that id.
-    socket.on("webrtcSignal", async ({ to, signal, callType, callId }, callback) => {
+    socket.on("webrtcSignal", async ({ to, signal, callType, callId, isGroupCall, roomId }, callback) => {
       console.log(
-        `[webrtcSignal] from=${socket.userId} to=${to} type=${signal?.type} callId=${callId}`
+        `[webrtcSignal] from=${socket.userId} to=${to} type=${signal?.type} callId=${callId} group=${!!isGroupCall}`
       );
 
       const recipientSocketId = to && getReceiverSocketId(to.toString());
 
-      // Log the call attempt regardless of whether the recipient is
-      // currently online — an unreachable callee should still show up
-      // in call history as a missed call, not vanish silently.
-      try {
-        if (callId && signal?.type === "offer" && socket.userId) {
-          const result = await CallLog.findOneAndUpdate(
-            { callId },
-            {
-              $setOnInsert: {
-                callId,
-                caller: socket.userId,
-                receiver: to,
-                type: callType === "video" ? "video" : "audio",
-                status: "ringing",
-                startedAt: new Date(),
+      // Group calls are a mesh of many 1:1 peer connections between the
+      // members of a room — we don't run them through the 1:1 CallLog
+      // upsert logic (that model assumes a single caller/receiver pair),
+      // and one mesh link dropping shouldn't be treated as the whole
+      // call being missed.
+      if (!isGroupCall) {
+        // Log the call attempt regardless of whether the recipient is
+        // currently online — an unreachable callee should still show up
+        // in call history as a missed call, not vanish silently.
+        try {
+          if (callId && signal?.type === "offer" && socket.userId) {
+            const result = await CallLog.findOneAndUpdate(
+              { callId },
+              {
+                $setOnInsert: {
+                  callId,
+                  caller: socket.userId,
+                  receiver: to,
+                  type: callType === "video" ? "video" : "audio",
+                  status: "ringing",
+                  startedAt: new Date(),
+                },
               },
-            },
-            { upsert: true, new: true }
-          );
-          console.log("[webrtcSignal] CallLog upserted on offer:", result?._id?.toString());
-        } else if (callId && signal?.type === "answer") {
-          const result = await CallLog.findOneAndUpdate(
-            { callId, status: "ringing" },
-            { status: "answered" },
-            { new: true }
-          );
-          console.log(
-            "[webrtcSignal] CallLog marked answered:",
-            result ? result._id.toString() : "NO MATCHING DOC FOUND"
-          );
+              { upsert: true, new: true }
+            );
+            console.log("[webrtcSignal] CallLog upserted on offer:", result?._id?.toString());
+          } else if (callId && signal?.type === "answer") {
+            const result = await CallLog.findOneAndUpdate(
+              { callId, status: "ringing" },
+              { status: "answered" },
+              { new: true }
+            );
+            console.log(
+              "[webrtcSignal] CallLog marked answered:",
+              result ? result._id.toString() : "NO MATCHING DOC FOUND"
+            );
+          }
+        } catch (err) {
+          console.error("[webrtcSignal] CallLog logging error:", err.message);
         }
-      } catch (err) {
-        console.error("[webrtcSignal] CallLog logging error:", err.message);
       }
 
       if (!recipientSocketId || !socket.userId) {
@@ -144,7 +151,7 @@ const chatSocket = (io) => {
         // Recipient isn't online to receive the offer at all — close the
         // log out as missed right away instead of leaving it stuck "ringing".
         try {
-          if (callId && signal?.type === "offer") {
+          if (!isGroupCall && callId && signal?.type === "offer") {
             await CallLog.findOneAndUpdate(
               { callId },
               { status: "missed", endedAt: new Date() }
@@ -164,53 +171,64 @@ const chatSocket = (io) => {
         signal,
         callType,
         callId,
+        isGroupCall: !!isGroupCall,
+        roomId,
       });
       if (typeof callback === "function") callback({ delivered: true });
     });
 
-    socket.on("webrtcEnd", async ({ to, callId }) => {
-      console.log(`[webrtcEnd] from=${socket.userId} to=${to} callId=${callId}`);
+    socket.on("webrtcEnd", async ({ to, callId, isGroupCall, roomId }) => {
+      console.log(
+        `[webrtcEnd] from=${socket.userId} to=${to} callId=${callId} group=${!!isGroupCall}`
+      );
 
       const recipientSocketId = to && getReceiverSocketId(to.toString());
 
-      try {
-        if (callId) {
-          const call = await CallLog.findOne({ callId });
-          if (!call) {
-            console.log("[webrtcEnd] NO CallLog FOUND for callId:", callId);
-          } else if (call.endedAt) {
-            console.log("[webrtcEnd] Call already closed:", callId);
-          } else {
-            const end = new Date();
-            call.endedAt = end;
-
-            if (call.status === "answered") {
-              call.duration = Math.max(
-                0,
-                Math.floor((end - call.startedAt) / 1000)
-              );
-            } else if (socket.userId?.toString() === call.receiver.toString()) {
-              // Receiver ended it before answering = declined.
-              call.status = "rejected";
+      // Group calls close out one mesh link at a time (one per remote
+      // member) instead of a single caller/receiver pair, so they don't
+      // go through the 1:1 CallLog close-out below.
+      if (!isGroupCall) {
+        try {
+          if (callId) {
+            const call = await CallLog.findOne({ callId });
+            if (!call) {
+              console.log("[webrtcEnd] NO CallLog FOUND for callId:", callId);
+            } else if (call.endedAt) {
+              console.log("[webrtcEnd] Call already closed:", callId);
             } else {
-              // Caller ended it before the other side answered = cancelled/no answer.
-              call.status = "missed";
-            }
+              const end = new Date();
+              call.endedAt = end;
 
-            await call.save();
-            console.log(
-              `[webrtcEnd] CallLog closed: status=${call.status} duration=${call.duration}`
-            );
+              if (call.status === "answered") {
+                call.duration = Math.max(
+                  0,
+                  Math.floor((end - call.startedAt) / 1000)
+                );
+              } else if (socket.userId?.toString() === call.receiver.toString()) {
+                // Receiver ended it before answering = declined.
+                call.status = "rejected";
+              } else {
+                // Caller ended it before the other side answered = cancelled/no answer.
+                call.status = "missed";
+              }
+
+              await call.save();
+              console.log(
+                `[webrtcEnd] CallLog closed: status=${call.status} duration=${call.duration}`
+              );
+            }
           }
+        } catch (err) {
+          console.error("[webrtcEnd] CallLog logging error:", err.message);
         }
-      } catch (err) {
-        console.error("[webrtcEnd] CallLog logging error:", err.message);
       }
 
       if (recipientSocketId && socket.userId) {
         io.to(recipientSocketId).emit("webrtcEnd", {
           from: socket.userId,
           callId,
+          isGroupCall: !!isGroupCall,
+          roomId,
         });
       }
     });

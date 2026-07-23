@@ -157,6 +157,82 @@ export const seenMessages = async (req, res) => {
   }
 };
 
+export const editMessage = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const { messageId } = req.params;
+    const { text } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: "Message can't be empty" });
+    }
+
+    const message = await messageModel.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.sender.toString() !== userId.toString()) {
+      return res.status(403).json({
+        message: "You can only edit your own messages",
+      });
+    }
+
+    if (message.isDeleted) {
+      return res.status(400).json({
+        message: "Deleted messages can't be edited",
+      });
+    }
+
+    message.text = text.trim();
+    message.isEdited = true;
+    message.editedAt = new Date();
+    await message.save();
+
+    // ✅ Keep the room's sidebar preview in sync if this was the latest message
+    const latestMessage = await messageModel
+      .findOne({ room: message.room })
+      .sort({ createdAt: -1 });
+
+    if (latestMessage && latestMessage._id.toString() === message._id.toString()) {
+      await roomModel.findByIdAndUpdate(message.room, {
+        lastMessage: message.text,
+      });
+    }
+
+    const io = req.app.get("io");
+    if (io && message.room) {
+      io.to(message.room.toString()).emit("messageEdited", {
+        messageId: message._id,
+        roomId: message.room,
+        text: message.text,
+        isEdited: true,
+        editedAt: message.editedAt,
+      });
+    }
+
+    return res.status(200).json({
+      message: "Message updated successfully",
+      updatedMessage: {
+        _id: message._id,
+        text: message.text,
+        isEdited: message.isEdited,
+        editedAt: message.editedAt,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      message: "Something went wrong",
+    });
+  }
+};
+
 export const deleteMessage = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
