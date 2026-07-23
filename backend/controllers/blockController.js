@@ -25,9 +25,9 @@ export const blockUser = async (req, res) => {
     });
 
     const io = req.app.get("io");
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (io && receiverSocketId) {
-      io.to(receiverSocketId).emit("userBlocked", {
+    const receiverSocketIds = getReceiverSocketId(receiverId);
+    if (io && receiverSocketIds.length) {
+      io.to(receiverSocketIds).emit("userBlocked", {
         blockedBy: blocker,
       });
     }
@@ -99,9 +99,9 @@ export const unblockUser = async (req, res) => {
     });
 
     const io = req.app.get("io");
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (io && receiverSocketId) {
-      io.to(receiverSocketId).emit("userUnblocked", {
+    const receiverSocketIds = getReceiverSocketId(receiverId);
+    if (io && receiverSocketIds.length) {
+      io.to(receiverSocketIds).emit("userUnblocked", {
         unblockedBy: blocker,
       });
     }

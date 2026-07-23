@@ -4121,23 +4121,28 @@ const MainChat = () => {
              Now they're siblings of <aside>/<main>, `fixed` to the viewport,
              so they always render regardless of which screen you're on. */}
         {voiceCall && (
-          <div className="fixed inset-0 bg-black/80 flex flex-col items-center justify-center space-y-6 z-[55] px-4">
+          <div className="fixed inset-0 bg-black/80 flex flex-col items-center justify-center space-y-8 z-[55] px-4">
             <h2 className="text-green-400 text-xl sm:text-2xl font-bold text-center">
               Audio call with {selectedUser?.name || "contact"}
             </h2>
             <audio ref={remoteAudioRef} autoPlay />
-            <div className="flex space-x-6 text-2xl text-gray-300">
+            <div className="flex items-center gap-6 sm:gap-8 text-2xl text-gray-300">
               <button
                 onClick={toggleMute}
                 aria-label={isMuted ? "Unmute" : "Mute"}
-                className={isMuted ? "text-red-400" : "hover:text-green-400"}
+                className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full transition-colors ${
+                  isMuted ? "bg-red-600 text-white" : "bg-gray-700 hover:bg-gray-600"
+                }`}
               >
                 <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
               </button>
-              <i
+              <button
                 onClick={() => endCall()}
-                className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"
-              ></i>
+                aria-label="End call"
+                className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white"
+              >
+                <i className="fa fa-phone-slash"></i>
+              </button>
             </div>
           </div>
         )}
@@ -4155,14 +4160,32 @@ const MainChat = () => {
         <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover rounded-xl" />
       </div>
     </div>
-    <div className="flex justify-center space-x-6 p-4 text-2xl text-gray-300 shrink-0">
-      <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className={isMuted ? "text-red-400" : "hover:text-green-400"}>
+    <div className="flex justify-center items-center gap-6 sm:gap-8 p-4 sm:p-6 text-2xl text-gray-300 shrink-0">
+      <button
+        onClick={toggleMute}
+        aria-label={isMuted ? "Unmute" : "Mute"}
+        className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full transition-colors ${
+          isMuted ? "bg-red-600 text-white" : "bg-gray-700 hover:bg-gray-600"
+        }`}
+      >
         <i className={`fa fa-microphone${isMuted ? "-slash" : ""}`}></i>
       </button>
-      <button onClick={toggleCamera} aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"} className={isCameraOff ? "text-red-400" : "hover:text-green-400"}>
+      <button
+        onClick={toggleCamera}
+        aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"}
+        className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full transition-colors ${
+          isCameraOff ? "bg-red-600 text-white" : "bg-gray-700 hover:bg-gray-600"
+        }`}
+      >
         <i className={`fa fa-video-camera${isCameraOff ? "-slash" : ""}`}></i>
       </button>
-      <i onClick={() => endCall()} className="fa fa-phone-slash text-red-500 hover:text-red-600 cursor-pointer"></i>
+      <button
+        onClick={() => endCall()}
+        aria-label="End call"
+        className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white"
+      >
+        <i className="fa fa-phone-slash"></i>
+      </button>
     </div>
   </div>
 )}

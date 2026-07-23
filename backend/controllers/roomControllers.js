@@ -128,10 +128,10 @@ export const leaveRoom = async (req, res) => {
       .populate("members", "name")
       .populate("createdBy", "name");
 
-    const currentSocketId = getReceiverSocketId(userId);
-    if (currentSocketId) {
-      io.of("/").sockets.get(currentSocketId)?.leave(roomId);
-    }
+    const currentSocketIds = getReceiverSocketId(userId);
+    currentSocketIds.forEach((socketId) => {
+      io.of("/").sockets.get(socketId)?.leave(roomId);
+    });
 
     io.to(roomId).emit("memberLeft", {
       roomId,
@@ -234,9 +234,9 @@ export const removeMember = async (req, res) => {
       .populate("createdBy", "name");
 
     const io = req.app.get("io");
-    const removedSocketId = getReceiverSocketId(userId);
-    if (removedSocketId) {
-      const removedSocket = io.sockets.sockets.get(removedSocketId);
+    const removedSocketIds = getReceiverSocketId(userId);
+    removedSocketIds.forEach((socketId) => {
+      const removedSocket = io.sockets.sockets.get(socketId);
       if (removedSocket) {
         removedSocket.leave(roomId);
         removedSocket.emit("removedFromRoom", {
@@ -245,7 +245,7 @@ export const removeMember = async (req, res) => {
           removedBy: adminId,
         });
       }
-    }
+    });
 
     io.to(roomId).emit("memberLeft", {
       roomId,

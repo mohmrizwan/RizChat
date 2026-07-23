@@ -2,14 +2,23 @@
 console.log("=== CALLLOG_DEBUG_BUILD_v2 — Chat.js loaded ===");
 import CallLog from "../models/CallLogsModel.js";
 
+// userId -> Set of live socket ids. A single account can be open on more
+// than one device/tab at once (phone + laptop, two browser tabs, etc). The
+// old implementation stored a single socketId per user, so logging in on a
+// second device silently stole delivery of calls/messages away from the
+// first — this Set keeps every active connection reachable.
 const onlineUsers = new Map();
 
 let ioInstance = null;
 
 export const getIO = () => ioInstance;
 
+// Returns an array of every live socket id for this user (empty array if
+// they're offline). Every call-site below already treats a falsy/empty
+// result as "offline" and an array is accepted directly by io.to(...).
 export const getReceiverSocketId = (userId) => {
-  return onlineUsers.get(userId);
+  const sockets = onlineUsers.get(userId?.toString?.() ?? userId);
+  return sockets ? Array.from(sockets) : [];
 };
 
 const chatSocket = (io) => {
@@ -22,8 +31,11 @@ const chatSocket = (io) => {
     socket.on("userOnline", (userId) => {
       socket.userId = userId;
 
-      onlineUsers.set(userId, socket.id);
-      console.log(`[userOnline] Registered userId=${userId} -> socket=${socket.id}`);
+      if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
+      onlineUsers.get(userId).add(socket.id);
+      console.log(
+        `[userOnline] Registered userId=${userId} -> socket=${socket.id} (${onlineUsers.get(userId).size} active connection(s))`
+      );
 
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
@@ -87,8 +99,8 @@ const chatSocket = (io) => {
       socket.to(chatId).emit(event, payload);
 
       // The recipient must receive typing even before joining the conversation room.
-      const recipientSocketId = recipientId && getReceiverSocketId(recipientId.toString());
-      if (recipientSocketId) io.to(recipientSocketId).emit(event, payload);
+      const recipientSocketIds = recipientId ? getReceiverSocketId(recipientId.toString()) : [];
+      if (recipientSocketIds.length) io.to(recipientSocketIds).emit(event, payload);
     });
 
     // Socket.IO is only used to exchange WebRTC signalling data; call media
@@ -100,7 +112,7 @@ const chatSocket = (io) => {
         `[webrtcSignal] from=${socket.userId} to=${to} type=${signal?.type} callId=${callId} group=${!!isGroupCall}`
       );
 
-      const recipientSocketId = to && getReceiverSocketId(to.toString());
+      const recipientSocketIds = to ? getReceiverSocketId(to.toString()) : [];
 
       // Group calls are a mesh of many 1:1 peer connections between the
       // members of a room — we don't run them through the 1:1 CallLog
@@ -144,9 +156,9 @@ const chatSocket = (io) => {
         }
       }
 
-      if (!recipientSocketId || !socket.userId) {
+      if (!recipientSocketIds.length || !socket.userId) {
         console.log(
-          `[webrtcSignal] Recipient unreachable — recipientSocketId=${recipientSocketId} socket.userId=${socket.userId}`
+          `[webrtcSignal] Recipient unreachable — recipientSocketIds=${recipientSocketIds} socket.userId=${socket.userId}`
         );
         // Recipient isn't online to receive the offer at all — close the
         // log out as missed right away instead of leaving it stuck "ringing".
@@ -166,7 +178,7 @@ const chatSocket = (io) => {
         return;
       }
 
-      io.to(recipientSocketId).emit("webrtcSignal", {
+      io.to(recipientSocketIds).emit("webrtcSignal", {
         from: socket.userId,
         signal,
         callType,
@@ -182,7 +194,7 @@ const chatSocket = (io) => {
         `[webrtcEnd] from=${socket.userId} to=${to} callId=${callId} group=${!!isGroupCall}`
       );
 
-      const recipientSocketId = to && getReceiverSocketId(to.toString());
+      const recipientSocketIds = to ? getReceiverSocketId(to.toString()) : [];
 
       // Group calls close out one mesh link at a time (one per remote
       // member) instead of a single caller/receiver pair, so they don't
@@ -223,8 +235,8 @@ const chatSocket = (io) => {
         }
       }
 
-      if (recipientSocketId && socket.userId) {
-        io.to(recipientSocketId).emit("webrtcEnd", {
+      if (recipientSocketIds.length && socket.userId) {
+        io.to(recipientSocketIds).emit("webrtcEnd", {
           from: socket.userId,
           callId,
           isGroupCall: !!isGroupCall,
@@ -257,7 +269,7 @@ const chatSocket = (io) => {
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
 
-      if (socket.userId && onlineUsers.get(socket.userId) === socket.id) {
+      if (socket.userId) {
         for (const room of socket.rooms) {
           if (room.startsWith("group-call:")) {
             socket.to(room).emit("groupCallParticipantLeft", {
@@ -266,9 +278,19 @@ const chatSocket = (io) => {
             });
           }
         }
-        onlineUsers.delete(socket.userId);
 
-        io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+        const userSockets = onlineUsers.get(socket.userId);
+        if (userSockets) {
+          userSockets.delete(socket.id);
+          // Only mark the user fully offline once their last active
+          // device/tab has disconnected — one closed tab shouldn't drop
+          // them off "online" for everyone else while another tab/device
+          // is still connected.
+          if (userSockets.size === 0) {
+            onlineUsers.delete(socket.userId);
+            io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+          }
+        }
       }
     });
   });
